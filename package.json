@@ -1,0 +1,35 @@
+{
+  "name": "curie-frontend",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "codegen": "rtk-query-codegen-openapi rtk-query-codegen.config.ts",
+    "start": "next start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raheebgill29/curie-frontend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/raheebgill29/curie-frontend/issues"
+  },
+  "homepage": "https://github.com/raheebgill29/curie-frontend#readme",
+  "dependencies": {
+    "@reduxjs/toolkit": "^2.11.1",
+    "next": "^16.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-redux": "^9.2.0"
+  },
+  "devDependencies": {
+    "@rtk-query/codegen-openapi": "^2.1.0",
+    "esbuild-runner": "^2.2.2",
+    "typescript": "^5.9.3"
+  }
+}
