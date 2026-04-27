@@ -153,6 +153,21 @@ function toVocabulary(interests, goals) {
     : FALLBACK_VOCABULARY.slice(0, 3);
 }
 
+const LESSON_TYPE_LABELS = {
+  story_and_discussion: "Story + Discussion",
+  song_and_movement: "Songs + Movement",
+  drama_and_role_play: "Drama + Role-play",
+  science_exploration: "Science Exploration",
+  mathematics: "Mathematics",
+};
+
+function formatLessonTypeLabel(lesson) {
+  const raw = String(lesson?.type || "");
+  if (raw.includes("_") && LESSON_TYPE_LABELS[raw]) return LESSON_TYPE_LABELS[raw];
+  if (Object.values(LESSON_TYPE_LABELS).includes(raw)) return raw;
+  return raw || "Session";
+}
+
 function getLatestProgressScores(progressData) {
   const progress = progressData?.progress || [];
   return progress.length ? progress[progress.length - 1]?.scores || {} : {};
@@ -210,7 +225,7 @@ function lessonToPlanDay(lesson, index) {
     day: DAY_SHORTS[dayIndex],
     label: DAY_LABELS[dayIndex],
     focus: (learningGoals.eyfs_focus || []).join(" + ") || learningGoals.subject_lens || "EYFS Learning",
-    type: lesson.lesson_type || "Guided Session",
+    type: formatLessonTypeLabel({ type: lesson.lesson_type || "Guided Session" }),
     status: dayIndex === 0 ? "done" : dayIndex === 1 ? "today" : "upcoming",
     time: "Curious Buddy",
     score: dayIndex === 0 ? 5 : null,
@@ -224,6 +239,29 @@ function lessonToPlanDay(lesson, index) {
 
 function mapLessonsToWeeklyPlan(lessons) {
   return lessons?.length ? lessons.map(lessonToPlanDay) : WEEKLY_PLAN;
+}
+
+const TUESDAY_DEMO = WEEKLY_PLAN[1];
+
+function withStaticTuesdayContent(days) {
+  if (!days?.length) return WEEKLY_PLAN;
+  const next = [...days];
+  if (next.length < 2) return next;
+  const dynamicTue = next[1] || {};
+  next[1] = {
+    ...TUESDAY_DEMO,
+    type: formatLessonTypeLabel(dynamicTue) || TUESDAY_DEMO.type,
+    focus: dynamicTue.focus || TUESDAY_DEMO.focus,
+    lessonId: dynamicTue.lessonId,
+    time: TUESDAY_DEMO.time,
+    content: TUESDAY_DEMO.content,
+    questions: TUESDAY_DEMO.questions,
+    aiLog: TUESDAY_DEMO.aiLog,
+    status: "done",
+    score: 5,
+    participation: 88,
+  };
+  return next;
 }
 
 function getAgeLabel(dob) {
@@ -800,7 +838,7 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
   const [createTheme, { isLoading: isCreatingTheme }] = useCreateThemeThemesPostMutation();
   const [createLesson, { isLoading: isCreatingLesson }] = useCreateLessonLessonsPostMutation();
   const backendPlan = mapLessonsToWeeklyPlan(lessons);
-  const weeklyPlan = personalizedPlan?.days || backendPlan;
+  const weeklyPlan = withStaticTuesdayContent(personalizedPlan?.days || backendPlan);
   const themeTitle = personalizedPlan?.title || selectedTheme?.title || "Body Awareness";
   const isSyncingPlan = isCreatingTheme || isCreatingLesson;
   const generatePlan = () => {
@@ -1147,21 +1185,13 @@ function Onboarding({ onReady }) {
 
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
 function TabProfile({ childId, parentSession, onSessionChange }) {
-  const [parentEmail, setParentEmail] = useState("");
-  const [parentPassword, setParentPassword] = useState("");
   const [childNameInput, setChildNameInput] = useState("");
   const [childDob, setChildDob] = useState("");
-  const [parentIdInput, setParentIdInput] = useState("");
   const { data: child } = useGetChildChildrenChildIdGetQuery({ childId });
-  const [registerParent, { data: registeredParent, isLoading: isRegisteringParent, isError: didRegisterParentFail }] = useRegisterParentParentsPostMutation();
   const [createChild, { data: createdChild, isLoading: isCreatingChild, isError: didCreateChildFail }] = useCreateChildChildrenPostMutation();
   const childName = child?.name || "Leo";
-  const handleRegisterParent = () => {
-    if (!parentEmail || !parentPassword) return;
-    registerParent({ parentCreateSchema: { email: parentEmail, password: parentPassword } });
-  };
   const handleCreateChild = () => {
-    const parentId = Number(parentIdInput || registeredParent?.id || parentSession?.parentId);
+    const parentId = Number(parentSession?.parentId);
     if (!childNameInput || !parentId) return;
     createChild({
       childCreateSchema: {
@@ -1199,23 +1229,11 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
       </button>
 
       <SectionLabel>Account Setup</SectionLabel>
-      <div style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:10, border:`1px solid ${B.creamLow}` }}>
-        <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Register Parent</p>
-        <input value={parentEmail} onChange={e=>setParentEmail(e.target.value)} placeholder="Parent email" style={inputStyle} />
-        <input value={parentPassword} onChange={e=>setParentPassword(e.target.value)} placeholder="Password" type="password" style={inputStyle} />
-        <button onClick={handleRegisterParent}
-          style={{ width:"100%", padding:12, borderRadius:10, background:B.gold, color:B.dark, border:"none", fontWeight:700, cursor:isRegisteringParent?"default":"pointer", fontFamily:"Georgia, serif" }}>
-          {isRegisteringParent ? "Registering..." : "Create Parent"}
-        </button>
-        {registeredParent && <p style={{ color:B.gold, fontSize:12, marginTop:8 }}>Parent created: #{registeredParent.id}</p>}
-        {didRegisterParentFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Parent registration failed.</p>}
-      </div>
-
       <div style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:18, border:`1px solid ${B.creamLow}` }}>
         <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Add Child</p>
+        <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.5, marginBottom:12 }}>This child will be linked to the logged-in parent automatically.</p>
         <input value={childNameInput} onChange={e=>setChildNameInput(e.target.value)} placeholder="Child name" style={inputStyle} />
         <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={inputStyle} />
-        <input value={parentIdInput} onChange={e=>setParentIdInput(e.target.value)} placeholder={registeredParent ? `Parent ID ${registeredParent.id}` : parentSession?.parentId ? `Parent ID ${parentSession.parentId}` : "Parent ID"} style={inputStyle} />
         <button onClick={handleCreateChild}
           style={{ width:"100%", padding:12, borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif" }}>
           {isCreatingChild ? "Adding..." : "Add Child"}
