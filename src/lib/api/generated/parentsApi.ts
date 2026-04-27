@@ -17,6 +17,15 @@ const injectedRtkApi = api
         }),
         invalidatesTags: ["parents"],
       }),
+      getParentChildrenParentsParentIdChildrenGet: build.query<
+        GetParentChildrenParentsParentIdChildrenGetApiResponse,
+        GetParentChildrenParentsParentIdChildrenGetApiArg
+      >({
+        query: (queryArg) => ({
+          url: `/parents/${queryArg.parentId}/children`,
+        }),
+        providesTags: ["parents"],
+      }),
     }),
     overrideExisting: false,
   });
@@ -25,6 +34,11 @@ export type RegisterParentParentsPostApiResponse =
   /** status 201 Successful Response */ ParentSchema;
 export type RegisterParentParentsPostApiArg = {
   parentCreateSchema: ParentCreateSchema;
+};
+export type GetParentChildrenParentsParentIdChildrenGetApiResponse =
+  /** status 200 Successful Response */ ChildSchema[];
+export type GetParentChildrenParentsParentIdChildrenGetApiArg = {
+  parentId: number;
 };
 export type ParentSchema = {
   email: string;
@@ -43,4 +57,14 @@ export type ParentCreateSchema = {
   email: string;
   password: string;
 };
-export const { useRegisterParentParentsPostMutation } = injectedRtkApi;
+export type ChildSchema = {
+  name: string;
+  dob?: string | null;
+  id: number;
+  parent_id: number;
+  created_at: string;
+};
+export const {
+  useRegisterParentParentsPostMutation,
+  useGetParentChildrenParentsParentIdChildrenGetQuery,
+} = injectedRtkApi;

@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { skipToken } from "@reduxjs/toolkit/query";
 import { useHealthCheckHealthGetQuery } from "./src/lib/api/generated/healthApi";
 import {
+  useCreateChildChildrenPostMutation,
   useGetChildChildrenChildIdGetQuery,
   useGetChildInsightsChildrenChildIdInsightsGetQuery,
   useGetChildProgressChildrenChildIdProgressGetQuery,
 } from "./src/lib/api/generated/childrenApi";
 import {
+  useCreateLessonLessonsPostMutation,
+  useCreateThemeThemesPostMutation,
   useGetLessonsByThemeThemesThemeIdLessonsGetQuery,
   useGetThemesThemesGetQuery,
+  usePreviewLessonLessonsLessonIdPreviewGetQuery,
 } from "./src/lib/api/generated/curriculumApi";
-import { useGetChildSessionsSessionsChildIdGetQuery } from "./src/lib/api/generated/sessionsApi";
-import { useGenerateSessionToyGenerateSessionPostMutation } from "./src/lib/api/generated/toyApi";
+import {
+  useGetChildSessionsSessionsChildIdGetQuery,
+  useGetSessionDetailSessionsSessionIdDetailGetQuery,
+} from "./src/lib/api/generated/sessionsApi";
+import {
+  useGetParentChildrenParentsParentIdChildrenGetQuery,
+  useRegisterParentParentsPostMutation,
+} from "./src/lib/api/generated/parentsApi";
+import { useLoginParentAuthLoginPostMutation } from "./src/lib/api/generated/authApi";
+import {
+  useEvaluateToyEvaluatePostMutation,
+  useGenerateSessionToyGenerateSessionPostMutation,
+  useRespondToyRespondPostMutation,
+} from "./src/lib/api/generated/toyApi";
 
 // ── Brand Palette ─────────────────────────────────────────────────────────────
 const B = {
@@ -73,6 +90,7 @@ const AI_INSIGHTS = [
 ];
 
 const DEMO_CHILD_ID = Number(process.env.NEXT_PUBLIC_DEMO_CHILD_ID || 1) || 1;
+const SESSION_KEY = "curiouser-session";
 
 const DOMAIN_SCORE_KEYS = {
   physical: ["physical", "physical_development", "physical development", "pd"],
@@ -87,9 +105,52 @@ const DOMAIN_SCORE_KEYS = {
 const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const DAY_SHORTS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const INSIGHT_ICONS = ["💬", "🧠", "🎨"];
+const LESSON_TYPES = [
+  "story_and_discussion",
+  "song_and_movement",
+  "drama_and_role_play",
+  "science_exploration",
+  "mathematics",
+  "story_and_discussion",
+  "drama_and_role_play",
+];
+const EYFS_AREA_MAP = {
+  "Communication": "communication_and_language",
+  "Maths & Logic": "mathematics",
+  "Creative Arts": "creative_arts",
+  "Social & Emotional": "personal_social_emotional",
+  "Nature & Science": "understanding_the_world",
+};
+const FALLBACK_VOCABULARY = ["explore", "imagine", "describe", "count", "share", "move", "notice", "wonder"];
 
 function normalizeKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function slugify(value) {
+  return normalizeKey(value).replace(/_/g, "-") || "custom-plan";
+}
+
+function uniqueList(values) {
+  return [...new Set(values.map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function toEyfsAreas(goals) {
+  const areas = uniqueList(goals.map(goal => EYFS_AREA_MAP[goal] || normalizeKey(goal)));
+  return areas.length ? areas : ["communication_and_language"];
+}
+
+function toVocabulary(interests, goals) {
+  const words = uniqueList([
+    ...interests,
+    ...goals,
+    ...interests.flatMap(interest => String(interest).split(/\s+/)),
+    ...FALLBACK_VOCABULARY,
+  ]).map(word => word.toLowerCase().replace(/[^a-z0-9-]/g, ""));
+
+  return uniqueList(words).slice(0, 8).length >= 3
+    ? uniqueList(words).slice(0, 8)
+    : FALLBACK_VOCABULARY.slice(0, 3);
 }
 
 function getLatestProgressScores(progressData) {
@@ -175,6 +236,89 @@ function getAgeLabel(dob) {
     today.getMonth() > birthDate.getMonth() ||
     (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
   return `Age ${hadBirthday ? age : age - 1}`;
+}
+
+function buildLessonPayload({ themeId, goals, interests, dayNumber = 1 }) {
+  const theme = interests[0] || "Curious";
+  const focus = goals.length ? goals : ["Communication"];
+  const eyfsFocus = toEyfsAreas(focus);
+  const vocabulary = toVocabulary(interests, focus);
+  const lessonType = LESSON_TYPES[(dayNumber - 1) % LESSON_TYPES.length];
+  const lessonKey = `${slugify(theme)}-${dayNumber}`;
+
+  return {
+    theme_id: themeId,
+    day_number: dayNumber,
+    lesson_type: lessonType,
+    learning_goals: {
+      title: `${theme} Adventure`,
+      subject_lens: focus.join(" + "),
+      eyfs_focus: eyfsFocus,
+      lesson_key: lessonKey,
+      content_json: {
+        ai_action: `Guide Leo through a playful ${theme.toLowerCase()} activity that supports ${focus.join(", ")}.`,
+        activity_narrative: `Curious Buddy invites Leo into a ${theme.toLowerCase()} adventure using movement, questions, and imaginative play.`,
+        lesson_key: lessonKey,
+        vocabulary,
+        learning_goals: eyfsFocus,
+        seven_step_structure: {
+          step_1_hook: `Invite Leo into the ${theme.toLowerCase()} adventure with a warm opening question.`,
+          step_2_core_activity: `Explore ${theme.toLowerCase()} through simple choices, actions, and descriptions.`,
+          step_3_do: "Ask Leo to point, move, count, describe, or pretend based on the activity.",
+          step_4_socratic: {
+            opening_question: `What do you notice first in our ${theme.toLowerCase()} adventure?`,
+            age_profiles: {
+              age_3: {
+                expected_action: "Leo answers with a short phrase, gesture, or pretend action.",
+                guiding_question: `Can you show Curious Buddy one ${theme.toLowerCase()} idea?`,
+                extension_question: `What could happen next in the ${theme.toLowerCase()} story?`,
+                educational_goal: `Build confidence in ${focus.join(", ")} through guided play.`,
+              },
+            },
+          },
+          step_5_extension: "Extend with one harder question if Leo is engaged.",
+          step_6_reflection: "Celebrate Leo's idea and name the skill he practiced.",
+        },
+      },
+    },
+    vocabulary,
+  };
+}
+
+function buildPersonalizedPlan({ goals, interests }) {
+  const focus = goals.length ? goals : ["Communication"];
+  const themes = interests.length ? interests : ["Curious"];
+  const activityTypes = ["Story + Discussion", "Movement Game", "Creative Role-play", "Science Exploration", "Maths Puzzle", "Social Practice", "Weekly Review"];
+
+  return DAY_LABELS.map((label, index) => {
+    const theme = themes[index % themes.length];
+    const goal = focus[index % focus.length];
+
+    return {
+      day: DAY_SHORTS[index],
+      label,
+      focus: goal,
+      type: activityTypes[index],
+      status: index === 0 ? "today" : "upcoming",
+      time: index === 6 ? "Free play" : "Curious Buddy",
+      score: null,
+      participation: null,
+      content: [
+        `${theme} themed ${goal.toLowerCase()} activity`,
+        "Socratic check-in question",
+        "Curious Buddy reflection and celebration",
+      ],
+      aiLog: null,
+      questions: [
+        `What do you notice about ${theme.toLowerCase()}?`,
+        `How could we use ${theme.toLowerCase()} to practice ${goal.toLowerCase()}?`,
+      ],
+      localPlan: true,
+      planTheme: theme,
+      planGoals: focus,
+      planInterests: themes,
+    };
+  });
 }
 
 // ── Radar Chart ───────────────────────────────────────────────────────────────
@@ -341,16 +485,43 @@ function DomainSheet({ domain, onClose, onEnhance }) {
 }
 
 // ── Day Sheet ─────────────────────────────────────────────────────────────────
-function DaySheet({ day, onClose }) {
+function DaySheet({ day, childId, onClose }) {
+  const [childInput, setChildInput] = useState("");
+  const [turns, setTurns] = useState([]);
   const [generateSession, { data: generatedSession, isLoading: isGenerating, isError: didGenerateFail }] = useGenerateSessionToyGenerateSessionPostMutation();
+  const [respond, { isLoading: isResponding, isError: didRespondFail }] = useRespondToyRespondPostMutation();
+  const [evaluate, { data: evaluation, isLoading: isEvaluating, isError: didEvaluateFail }] = useEvaluateToyEvaluatePostMutation();
+  const { data: preview } = usePreviewLessonLessonsLessonIdPreviewGetQuery(day.lessonId ? { lessonId: day.lessonId } : skipToken);
   const startSession = () => {
     if (!day.lessonId) return;
+    setTurns([]);
     generateSession({
       generateSessionRequest: {
-        child_id: DEMO_CHILD_ID,
+          child_id: childId,
         lesson_id: day.lessonId,
       },
     });
+  };
+  const sendChildInput = async () => {
+    if (!generatedSession?.session_id || !childInput.trim()) return;
+    const input = childInput.trim();
+    setChildInput("");
+    setTurns(prev => [...prev, { actor: "child", text: input }]);
+    try {
+      const response = await respond({
+        respondRequest: {
+          session_id: generatedSession.session_id,
+          child_input: input,
+        },
+      }).unwrap();
+      setTurns(prev => [...prev, { actor: "buddy", text: response.response_text, state: response.child_state, goal: response.current_goal }]);
+    } catch {
+      setTurns(prev => [...prev, { actor: "system", text: "Curious Buddy could not respond. Please try again." }]);
+    }
+  };
+  const evaluateSession = () => {
+    if (!generatedSession?.session_id) return;
+    evaluate({ evaluateRequest: { session_id: generatedSession.session_id } });
   };
 
   return (
@@ -373,6 +544,12 @@ function DaySheet({ day, onClose }) {
 
         {day.lessonId && (
           <div style={{ margin:"18px 0", background:B.creamFade, borderRadius:14, padding:14, border:`1px solid ${B.creamLow}` }}>
+            {preview && (
+              <div style={{ marginBottom:14, paddingBottom:14, borderBottom:`1px solid ${B.creamLow}` }}>
+                <SectionLabel>AI Prompt Preview</SectionLabel>
+                <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.55 }}>{preview.rendered_system_prompt.slice(0, 220)}{preview.rendered_system_prompt.length > 220 ? "..." : ""}</p>
+              </div>
+            )}
             <button onClick={startSession}
               style={{ width:"100%", padding:12, borderRadius:11, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isGenerating?"default":"pointer", fontFamily:"Georgia, serif" }}>
               {isGenerating ? "Starting Curious Buddy..." : "Start AI Toy Session"}
@@ -383,6 +560,36 @@ function DaySheet({ day, onClose }) {
               </p>
             )}
             {didGenerateFail && <p style={{ color:B.terra, fontSize:12, marginTop:10 }}>Could not start this session. Check the backend data for this child and lesson.</p>}
+            {generatedSession && (
+              <div style={{ marginTop:14 }}>
+                {turns.map((turn, i) => (
+                  <div key={i} style={{ marginBottom:8, padding:10, borderRadius:10, background:turn.actor==="child"?B.terraFade:B.goldFade, border:`1px solid ${B.creamLow}` }}>
+                    <p style={{ color:turn.actor==="child"?B.terra:B.gold, fontSize:10, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:4 }}>{turn.actor}</p>
+                    <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.45 }}>{turn.text}</p>
+                    {turn.goal && <p style={{ color:B.creamMid, fontSize:10, marginTop:5 }}>Goal: {turn.goal}</p>}
+                  </div>
+                ))}
+                <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                  <input value={childInput} onChange={e=>setChildInput(e.target.value)} placeholder="Child says..."
+                    style={{ flex:1, minWidth:0, padding:"11px 12px", borderRadius:10, background:B.bgDeep, color:B.cream, border:`1px solid ${B.creamLow}` }} />
+                  <button onClick={sendChildInput}
+                    style={{ padding:"0 14px", borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isResponding?"default":"pointer" }}>
+                    {isResponding ? "..." : "Send"}
+                  </button>
+                </div>
+                {didRespondFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Toy response failed.</p>}
+                <button onClick={evaluateSession}
+                  style={{ width:"100%", marginTop:10, padding:11, borderRadius:10, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, cursor:isEvaluating?"default":"pointer" }}>
+                  {isEvaluating ? "Evaluating..." : "End & Evaluate Session"}
+                </button>
+                {evaluation && (
+                  <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.55, marginTop:10 }}>
+                    <strong style={{ color:B.gold }}>Evaluation:</strong> {evaluation.insight_summary}
+                  </p>
+                )}
+                {didEvaluateFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Evaluation failed.</p>}
+              </div>
+            )}
           </div>
         )}
 
@@ -432,16 +639,18 @@ function DaySheet({ day, onClose }) {
 }
 
 // ── Tab: Dashboard ────────────────────────────────────────────────────────────
-function TabDashboard({ onNudge }) {
+function TabDashboard({ childId, onNudge }) {
   const [mode, setMode] = useState("Learning");
   const [vol, setVol] = useState(70);
   const { data: health, isFetching: isHealthFetching } = useHealthCheckHealthGetQuery();
-  const { data: sessions } = useGetChildSessionsSessionsChildIdGetQuery({ childId: DEMO_CHILD_ID, page: 1, pageSize: 5 });
-  const { data: insightsData } = useGetChildInsightsChildrenChildIdInsightsGetQuery({ childId: DEMO_CHILD_ID });
+  const { data: sessions } = useGetChildSessionsSessionsChildIdGetQuery({ childId, page: 1, pageSize: 5 });
+  const { data: insightsData } = useGetChildInsightsChildrenChildIdInsightsGetQuery({ childId });
   const modes = ["Learning","Sleep","Free Chat"];
   const aiInsights = mapInsights(insightsData);
   const onlineLabel = health?.status ? "Curious Buddy Online" : isHealthFetching ? "Checking Buddy Status" : "Curious Buddy Offline";
   const latestSession = sessions?.items?.[0];
+  const { data: latestSessionDetail } = useGetSessionDetailSessionsSessionIdDetailGetQuery(latestSession?.id ? { sessionId: latestSession.id } : skipToken);
+  const latestEvent = latestSessionDetail?.events?.[latestSessionDetail.events.length - 1];
 
   return (
     <div style={{ padding:"0 20px 110px" }}>
@@ -465,6 +674,14 @@ function TabDashboard({ onNudge }) {
           ✦ Nudge Topic
         </button>
       </div>
+
+      {latestEvent && (
+        <div style={{ background:B.bgDeep, borderRadius:20, padding:20, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
+          <SectionLabel>Latest Session Detail</SectionLabel>
+          <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:6, fontFamily:"Georgia, serif" }}>Turn {latestEvent.turn_number} · {latestEvent.actor}</p>
+          <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.6 }}>{latestEvent.text}</p>
+        </div>
+      )}
 
       {/* Stats */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
@@ -512,11 +729,11 @@ function TabDashboard({ onNudge }) {
 }
 
 // ── Tab: Growth ───────────────────────────────────────────────────────────────
-function TabGrowth() {
+function TabGrowth({ childId }) {
   const [selectedDomain, setSelectedDomain] = useState(null);
   const [enhanced, setEnhanced] = useState([]);
-  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId: DEMO_CHILD_ID });
-  const { data: progressData, isFetching, isError } = useGetChildProgressChildrenChildIdProgressGetQuery({ childId: DEMO_CHILD_ID });
+  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId });
+  const { data: progressData, isFetching, isError } = useGetChildProgressChildrenChildIdProgressGetQuery({ childId });
   const domains = mapProgressToDomains(progressData);
   const childName = child?.name || "Leo";
   return (
@@ -565,26 +782,74 @@ function TabGrowth() {
 }
 
 // ── Tab: Curriculum ───────────────────────────────────────────────────────────
-function TabCurriculum() {
+function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [building, setBuilding] = useState(false);
   const [step, setStep] = useState(0);
   const [goals, setGoals] = useState([]);
   const [interests, setInterests] = useState([]);
   const [generated, setGenerated] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [syncedPlan, setSyncedPlan] = useState(null);
+  const [draftPlan, setDraftPlan] = useState(null);
   const goalOptions     = ["Communication","Maths & Logic","Creative Arts","Social & Emotional","Nature & Science"];
   const interestOptions = ["Dinosaurs","Space","Ocean","Animals","Superheroes","Cooking"];
   const { data: themes = [], isFetching: isLoadingThemes } = useGetThemesThemesGetQuery();
   const selectedTheme = themes[0];
   const { data: lessons = [], isFetching: isLoadingLessons } = useGetLessonsByThemeThemesThemeIdLessonsGetQuery({ themeId: selectedTheme?.id || 1 });
-  const weeklyPlan = mapLessonsToWeeklyPlan(lessons);
-  const themeTitle = selectedTheme?.title || "Body Awareness";
+  const [createTheme, { isLoading: isCreatingTheme }] = useCreateThemeThemesPostMutation();
+  const [createLesson, { isLoading: isCreatingLesson }] = useCreateLessonLessonsPostMutation();
+  const backendPlan = mapLessonsToWeeklyPlan(lessons);
+  const weeklyPlan = personalizedPlan?.days || backendPlan;
+  const themeTitle = personalizedPlan?.title || selectedTheme?.title || "Body Awareness";
+  const isSyncingPlan = isCreatingTheme || isCreatingLesson;
+  const generatePlan = () => {
+    const days = buildPersonalizedPlan({ goals, interests });
+    const title = `${interests[0] || "Custom"} Adventure`;
+    const plan = { title, goals, interests, days };
+    setDraftPlan(plan);
+    onPersonalizedPlan(plan);
+    setGenerated(true);
+  };
+  const syncPlan = async () => {
+    setSyncError("");
+    const plan = draftPlan || personalizedPlan || { title: `${interests[0] || "Custom"} Adventure`, goals, interests, days: buildPersonalizedPlan({ goals, interests }) };
+
+    try {
+      const theme = await createTheme({
+            themeCreateSchema: {
+              theme_key: `${slugify(plan.title)}-${Date.now()}`,
+              title: plan.title,
+              week_number: 1,
+              duration_days: 7,
+            },
+          }).unwrap();
+
+      const createdLessons = [];
+      for (let index = 0; index < 7; index += 1) {
+        const lessonPayload = buildLessonPayload({
+          themeId: theme.id,
+          goals: plan.goals,
+          interests: plan.interests,
+          dayNumber: index + 1,
+        });
+        createdLessons.push(await createLesson({ lessonCreateSchema: lessonPayload }).unwrap());
+      }
+
+      setSyncedPlan({ theme, lesson: createdLessons[0], count: createdLessons.length });
+      setStep(3);
+    } catch {
+      setSyncedPlan(null);
+      setStep(3);
+      setSyncError("Your plan is saved in the app, but backend sync failed. The backend may require admin permissions for curriculum creation.");
+    }
+  };
 
   if (building) {
     const stepLabels = ["Goals","Interests","Generate","Sync"];
     return (
       <div style={{ padding:"0 20px 110px" }}>
-        <button onClick={()=>{ setBuilding(false); setStep(0); setGoals([]); setInterests([]); setGenerated(false); }}
+        <button onClick={()=>{ setBuilding(false); setStep(0); setGoals([]); setInterests([]); setGenerated(false); setSyncError(""); setSyncedPlan(null); setDraftPlan(null); }}
           style={{ background:"none", border:"none", color:B.gold, fontSize:14, cursor:"pointer", marginBottom:18, fontFamily:"Georgia, serif" }}>← Back</button>
 
         {/* Step bar */}
@@ -644,7 +909,7 @@ function TabCurriculum() {
                 <div style={{ fontSize:42, marginBottom:18, color:B.gold }}>◈</div>
                 <p style={{ color:B.cream, fontSize:18, fontWeight:700, fontFamily:"Georgia, serif" }}>Crafting your curriculum...</p>
                 <p style={{ color:B.creamMid, fontSize:13, marginTop:8, lineHeight:1.5 }}>Built on EYFS framework & Socratic Method</p>
-                <button onClick={()=>setGenerated(true)} style={{ marginTop:26, padding:"13px 36px", borderRadius:12, background:B.gold, color:B.dark, border:"none", cursor:"pointer", fontWeight:700, fontFamily:"Georgia, serif" }}>View Curriculum</button>
+                <button onClick={generatePlan} style={{ marginTop:26, padding:"13px 36px", borderRadius:12, background:B.gold, color:B.dark, border:"none", cursor:"pointer", fontWeight:700, fontFamily:"Georgia, serif" }}>View Curriculum</button>
               </div>
             ) : (
               <div>
@@ -659,7 +924,12 @@ function TabCurriculum() {
                     · A full 7-day EYFS-structured session plan
                   </p>
                 </div>
-                <button onClick={()=>setStep(3)} style={{ width:"100%", padding:15, borderRadius:12, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:"pointer", fontFamily:"Georgia, serif" }}>Sync to Curious Buddy ✦</button>
+                <button onClick={syncPlan} style={{ width:"100%", padding:15, borderRadius:12, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isSyncingPlan?"default":"pointer", fontFamily:"Georgia, serif" }}>{isSyncingPlan ? "Syncing..." : "Save & Sync to Curious Buddy ✦"}</button>
+                <button onClick={()=>{ setStep(3); setSyncedPlan(null); }}
+                  style={{ width:"100%", marginTop:10, padding:13, borderRadius:12, background:B.creamFade, color:B.cream, fontWeight:700, border:`1px solid ${B.creamLow}`, cursor:"pointer", fontFamily:"Georgia, serif" }}>
+                  Use This Plan Without Backend Sync
+                </button>
+                {syncError && <p style={{ color:B.terra, fontSize:12, lineHeight:1.5, marginTop:10 }}>{syncError}</p>}
               </div>
             )}
           </div>
@@ -668,9 +938,10 @@ function TabCurriculum() {
         {step===3 && (
           <div style={{ textAlign:"center", padding:"44px 0" }}>
             <div style={{ fontSize:52, marginBottom:16 }}>✦</div>
-            <p style={{ color:B.gold, fontSize:22, fontWeight:700, fontFamily:"Georgia, serif" }}>Sync Complete</p>
-            <p style={{ color:B.creamMid, fontSize:14, marginTop:10, lineHeight:1.6 }}>Curious Buddy will begin your<br />personalised curriculum next session</p>
-            <button onClick={()=>{ setBuilding(false); setStep(0); setGoals([]); setInterests([]); setGenerated(false); }}
+            <p style={{ color:B.gold, fontSize:22, fontWeight:700, fontFamily:"Georgia, serif" }}>{syncedPlan ? "Sync Complete" : "Plan Ready"}</p>
+            <p style={{ color:B.creamMid, fontSize:14, marginTop:10, lineHeight:1.6 }}>{syncedPlan ? `Theme #${syncedPlan.theme.id} · ${syncedPlan.count || 1} lessons synced` : "Your personalised curriculum is now active in the app."}</p>
+            {syncError && <p style={{ color:B.terra, fontSize:12, lineHeight:1.5, marginTop:10 }}>{syncError}</p>}
+            <button onClick={()=>{ setBuilding(false); setStep(0); setGoals([]); setInterests([]); setGenerated(false); setSyncError(""); setSyncedPlan(null); setDraftPlan(null); }}
               style={{ marginTop:26, padding:"12px 34px", borderRadius:12, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, cursor:"pointer", fontWeight:600 }}>
               Back to Curriculum
             </button>
@@ -733,15 +1004,182 @@ function TabCurriculum() {
         ✦ Build a New Personalised Plan
       </button>
 
-      {selectedDay && <DaySheet day={selectedDay} onClose={()=>setSelectedDay(null)} />}
+      {selectedDay && <DaySheet day={selectedDay} childId={childId} onClose={()=>setSelectedDay(null)} />}
+    </div>
+  );
+}
+
+// ── Onboarding ────────────────────────────────────────────────────────────────
+function Onboarding({ onReady }) {
+  const [step, setStep] = useState("parent");
+  const [activeParent, setActiveParent] = useState(null);
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentPassword, setParentPassword] = useState("");
+  const [childName, setChildName] = useState("");
+  const [childDob, setChildDob] = useState("");
+  const [message, setMessage] = useState("");
+  const parentId = activeParent?.id;
+  const [loginParent, { isLoading: isLoggingIn }] = useLoginParentAuthLoginPostMutation();
+  const [registerParent, { isLoading: isRegisteringParent }] = useRegisterParentParentsPostMutation();
+  const [createChild, { isLoading: isCreatingChild }] = useCreateChildChildrenPostMutation();
+  const { data: children = [], isFetching: isLoadingChildren } = useGetParentChildrenParentsParentIdChildrenGetQuery(parentId ? { parentId } : skipToken);
+  const inputStyle = {
+    width:"100%",
+    padding:"12px 13px",
+    borderRadius:11,
+    background:B.bgDeep,
+    color:B.cream,
+    border:`1px solid ${B.creamLow}`,
+    marginBottom:10,
+  };
+  const saveSession = (session) => {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    onReady(session);
+  };
+  const handleLoginParent = async () => {
+    if (!parentEmail || !parentPassword) {
+      setMessage("Email and password are required.");
+      return;
+    }
+    try {
+      const parent = await loginParent({ parentLoginSchema: { email: parentEmail, password: parentPassword } }).unwrap();
+      setActiveParent(parent);
+      setMessage("");
+      setStep("child");
+    } catch {
+      setMessage("Login failed. Check the parent email and password.");
+    }
+  };
+  const handleRegisterParent = async () => {
+    if (!parentEmail || !parentPassword) {
+      setMessage("Email and password are required.");
+      return;
+    }
+    try {
+      const parent = await registerParent({ parentCreateSchema: { email: parentEmail, password: parentPassword } }).unwrap();
+      setActiveParent(parent);
+      setMessage(`Parent created. ID ${parent.id}`);
+      setStep("child");
+    } catch {
+      setMessage("Parent registration failed. Try a different email/password.");
+    }
+  };
+  const continueWithChild = (child) => {
+    saveSession({
+      parentId: parentId,
+      parentEmail: activeParent?.email,
+      childId: child.id,
+      childName: child.name,
+    });
+  };
+  const handleCreateChild = async () => {
+    if (!parentId || !childName) {
+      setMessage("Parent ID and child name are required.");
+      return;
+    }
+    try {
+      const child = await createChild({
+        childCreateSchema: {
+          name: childName,
+          dob: childDob || null,
+          parent_id: parentId,
+        },
+      }).unwrap();
+      saveSession({ parentId, parentEmail: activeParent?.email, childId: child.id, childName: child.name });
+    } catch {
+      setMessage("Child creation failed. Check the parent ID and try again.");
+    }
+  };
+
+  return (
+    <div style={{ minHeight:"100vh", background:B.bg, fontFamily:"Georgia, 'Times New Roman', serif", maxWidth:430, margin:"0 auto", padding:"54px 22px" }}>
+      <p style={{ color:B.creamMid, fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase" }}>Welcome to</p>
+      <h1 style={{ color:B.cream, fontSize:34, margin:"4px 0 8px", fontFamily:"Georgia, serif" }}>Curiouser</h1>
+      <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.6, marginBottom:28 }}>Login with parent email, then choose which child profile to continue with.</p>
+
+      <div style={{ background:B.bgDeep, borderRadius:22, padding:22, border:`1px solid ${B.creamLow}` }}>
+        {step === "parent" ? (
+          <>
+            <SectionLabel>Parent Login</SectionLabel>
+            <input value={parentEmail} onChange={e=>setParentEmail(e.target.value)} placeholder="Email" style={inputStyle} />
+            <input value={parentPassword} onChange={e=>setParentPassword(e.target.value)} placeholder="Password" type="password" style={inputStyle} />
+            <button onClick={handleLoginParent}
+              style={{ width:"100%", padding:13, borderRadius:12, background:B.gold, color:B.dark, border:"none", fontWeight:700, marginBottom:18, cursor:isLoggingIn?"default":"pointer", fontFamily:"Georgia, serif" }}>
+              {isLoggingIn ? "Logging in..." : "Login"}
+            </button>
+
+            <Divider />
+            <p style={{ color:B.cream, fontSize:15, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>New parent?</p>
+            <button onClick={handleRegisterParent}
+              style={{ width:"100%", padding:13, borderRadius:12, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isRegisteringParent?"default":"pointer", fontFamily:"Georgia, serif" }}>
+              {isRegisteringParent ? "Creating..." : "Create Parent"}
+            </button>
+          </>
+        ) : (
+          <>
+            <SectionLabel>Child Profile</SectionLabel>
+            <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.5, marginBottom:14 }}>Logged in as {activeParent?.email}. Select a child to continue.</p>
+            {isLoadingChildren && <p style={{ color:B.creamMid, fontSize:12, marginBottom:10 }}>Loading children...</p>}
+            {!isLoadingChildren && children.length === 0 && <p style={{ color:B.creamMid, fontSize:12, marginBottom:10 }}>No child profiles yet. Add one below.</p>}
+            {children.map(child => (
+              <button key={child.id} onClick={()=>continueWithChild(child)}
+                style={{ width:"100%", padding:14, borderRadius:14, background:B.goldFade, color:B.cream, border:`1px solid rgba(201,139,44,0.35)`, marginBottom:10, textAlign:"left", cursor:"pointer", fontFamily:"Georgia, serif" }}>
+                <span style={{ display:"block", color:B.gold, fontSize:16, fontWeight:700 }}>{child.name}</span>
+                <span style={{ display:"block", color:B.creamMid, fontSize:12, marginTop:3 }}>{getAgeLabel(child.dob)} · Child ID {child.id}</span>
+              </button>
+            ))}
+
+            <Divider />
+            <p style={{ color:B.cream, fontSize:15, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Create child</p>
+            <input value={childName} onChange={e=>setChildName(e.target.value)} placeholder="Child name" style={inputStyle} />
+            <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={inputStyle} />
+            <button onClick={handleCreateChild}
+              style={{ width:"100%", padding:13, borderRadius:12, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif" }}>
+              {isCreatingChild ? "Creating..." : "Create Child & Enter App"}
+            </button>
+          </>
+        )}
+        {message && <p style={{ color:B.terra, fontSize:12, lineHeight:1.5, marginTop:14 }}>{message}</p>}
+      </div>
     </div>
   );
 }
 
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
-function TabProfile() {
-  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId: DEMO_CHILD_ID });
+function TabProfile({ childId, parentSession, onSessionChange }) {
+  const [parentEmail, setParentEmail] = useState("");
+  const [parentPassword, setParentPassword] = useState("");
+  const [childNameInput, setChildNameInput] = useState("");
+  const [childDob, setChildDob] = useState("");
+  const [parentIdInput, setParentIdInput] = useState("");
+  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId });
+  const [registerParent, { data: registeredParent, isLoading: isRegisteringParent, isError: didRegisterParentFail }] = useRegisterParentParentsPostMutation();
+  const [createChild, { data: createdChild, isLoading: isCreatingChild, isError: didCreateChildFail }] = useCreateChildChildrenPostMutation();
   const childName = child?.name || "Leo";
+  const handleRegisterParent = () => {
+    if (!parentEmail || !parentPassword) return;
+    registerParent({ parentCreateSchema: { email: parentEmail, password: parentPassword } });
+  };
+  const handleCreateChild = () => {
+    const parentId = Number(parentIdInput || registeredParent?.id || parentSession?.parentId);
+    if (!childNameInput || !parentId) return;
+    createChild({
+      childCreateSchema: {
+        name: childNameInput,
+        dob: childDob || null,
+        parent_id: parentId,
+      },
+    });
+  };
+  const inputStyle = {
+    width:"100%",
+    padding:"11px 12px",
+    borderRadius:10,
+    background:B.bgDeep,
+    color:B.cream,
+    border:`1px solid ${B.creamLow}`,
+    marginBottom:8,
+  };
   return (
     <div style={{ padding:"0 20px 110px" }}>
       <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, display:"flex", gap:16, alignItems:"center", border:`1px solid ${B.creamLow}` }}>
@@ -751,8 +1189,39 @@ function TabProfile() {
         <div>
           <p style={{ color:B.cream, fontSize:21, fontWeight:700, fontFamily:"Georgia, serif" }}>{childName}</p>
           <p style={{ color:B.creamMid, fontSize:13 }}>{getAgeLabel(child?.dob)} · EYFS Growth Profile</p>
-          <p style={{ color:B.gold, fontSize:12, marginTop:3, fontFamily:"Georgia, serif" }}>✦ Child ID {child?.id || DEMO_CHILD_ID}</p>
+          <p style={{ color:B.gold, fontSize:12, marginTop:3, fontFamily:"Georgia, serif" }}>✦ Child ID {child?.id || childId}</p>
         </div>
+      </div>
+
+      <button onClick={()=>{ localStorage.removeItem(SESSION_KEY); onSessionChange(null); }}
+        style={{ width:"100%", padding:13, borderRadius:14, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, marginBottom:18, cursor:"pointer", fontFamily:"Georgia, serif" }}>
+        Switch Parent / Child
+      </button>
+
+      <SectionLabel>Account Setup</SectionLabel>
+      <div style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:10, border:`1px solid ${B.creamLow}` }}>
+        <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Register Parent</p>
+        <input value={parentEmail} onChange={e=>setParentEmail(e.target.value)} placeholder="Parent email" style={inputStyle} />
+        <input value={parentPassword} onChange={e=>setParentPassword(e.target.value)} placeholder="Password" type="password" style={inputStyle} />
+        <button onClick={handleRegisterParent}
+          style={{ width:"100%", padding:12, borderRadius:10, background:B.gold, color:B.dark, border:"none", fontWeight:700, cursor:isRegisteringParent?"default":"pointer", fontFamily:"Georgia, serif" }}>
+          {isRegisteringParent ? "Registering..." : "Create Parent"}
+        </button>
+        {registeredParent && <p style={{ color:B.gold, fontSize:12, marginTop:8 }}>Parent created: #{registeredParent.id}</p>}
+        {didRegisterParentFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Parent registration failed.</p>}
+      </div>
+
+      <div style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:18, border:`1px solid ${B.creamLow}` }}>
+        <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Add Child</p>
+        <input value={childNameInput} onChange={e=>setChildNameInput(e.target.value)} placeholder="Child name" style={inputStyle} />
+        <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={inputStyle} />
+        <input value={parentIdInput} onChange={e=>setParentIdInput(e.target.value)} placeholder={registeredParent ? `Parent ID ${registeredParent.id}` : parentSession?.parentId ? `Parent ID ${parentSession.parentId}` : "Parent ID"} style={inputStyle} />
+        <button onClick={handleCreateChild}
+          style={{ width:"100%", padding:12, borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif" }}>
+          {isCreatingChild ? "Adding..." : "Add Child"}
+        </button>
+        {createdChild && <p style={{ color:B.gold, fontSize:12, marginTop:8 }}>Child created: {createdChild.name} #{createdChild.id}</p>}
+        {didCreateChildFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Child creation failed.</p>}
       </div>
 
       <SectionLabel>Curiouser Parent Community</SectionLabel>
@@ -787,6 +1256,19 @@ function TabProfile() {
 export default function CuriouserApp() {
   const [tab, setTab] = useState(0);
   const [showNudge, setShowNudge] = useState(false);
+  const [session, setSession] = useState(null);
+  const [personalizedPlan, setPersonalizedPlan] = useState(null);
+
+  useEffect(() => {
+    const savedSession = localStorage.getItem(SESSION_KEY);
+    if (savedSession) {
+      try {
+        setSession(JSON.parse(savedSession));
+      } catch {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    }
+  }, []);
 
   const tabs = [
     { label:"Home",       icon:"⌂"  },
@@ -794,6 +1276,12 @@ export default function CuriouserApp() {
     { label:"Curriculum", icon:"⊞"  },
     { label:"Profile",    icon:"◉"  },
   ];
+
+  if (!session?.childId) {
+    return <Onboarding onReady={setSession} />;
+  }
+
+  const childId = Number(session.childId);
 
   return (
     <div style={{ minHeight:"100vh", background:B.bg, fontFamily:"Georgia, 'Times New Roman', serif", position:"relative", maxWidth:430, margin:"0 auto" }}>
@@ -824,10 +1312,10 @@ export default function CuriouserApp() {
 
       {/* Content */}
       <div style={{ overflowY:"auto" }}>
-        {tab===0 && <TabDashboard onNudge={()=>setShowNudge(true)} />}
-        {tab===1 && <TabGrowth />}
-        {tab===2 && <TabCurriculum />}
-        {tab===3 && <TabProfile />}
+        {tab===0 && <TabDashboard childId={childId} onNudge={()=>setShowNudge(true)} />}
+        {tab===1 && <TabGrowth childId={childId} />}
+        {tab===2 && <TabCurriculum childId={childId} personalizedPlan={personalizedPlan} onPersonalizedPlan={setPersonalizedPlan} />}
+        {tab===3 && <TabProfile childId={childId} parentSession={session} onSessionChange={setSession} />}
       </div>
 
       {/* Bottom nav */}

@@ -12,28 +12,28 @@ const config: ConfigFile = {
   hooks: true,
   tag: true,
   outputFiles: {
-    './src/lib/api/generated/healthApi.ts': {
-      filterEndpoints: byTag('health'),
-      apiImport: 'baseApi',
-    },
-    './src/lib/api/generated/toyApi.ts': {
-      filterEndpoints: byTag('toy'),
-      apiImport: 'baseApi',
-    },
+    // './src/lib/api/generated/healthApi.ts': {
+    //   filterEndpoints: byTag('health'),
+    //   apiImport: 'baseApi',
+    // },
+    // './src/lib/api/generated/toyApi.ts': {
+    //   filterEndpoints: byTag('toy'),
+    //   apiImport: 'baseApi',
+    // },
     './src/lib/api/generated/parentsApi.ts': {
       filterEndpoints: byTag('parents'),
       apiImport: 'baseApi',
     },
-    './src/lib/api/generated/childrenApi.ts': {
-      filterEndpoints: byTag('children'),
-      apiImport: 'baseApi',
-    },
-    './src/lib/api/generated/curriculumApi.ts': {
-      filterEndpoints: byTag('curriculum'),
-      apiImport: 'baseApi',
-    },
-    './src/lib/api/generated/sessionsApi.ts': {
-      filterEndpoints: byTag('sessions'),
+    // './src/lib/api/generated/childrenApi.ts': {
+    //   filterEndpoints: byTag('children'),
+    //   apiImport: 'baseApi',
+    // },
+    // './src/lib/api/generated/curriculumApi.ts': {
+    //   filterEndpoints: byTag('curriculum'),
+    //   apiImport: 'baseApi',
+    // },
+    './src/lib/api/generated/authApi.ts': {
+      filterEndpoints: byTag('auth'),
       apiImport: 'baseApi',
     },
   },

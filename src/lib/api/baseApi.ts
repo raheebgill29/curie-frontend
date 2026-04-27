@@ -7,6 +7,6 @@ export const baseApi = createApi({
       process.env.NEXT_PUBLIC_API_BASE_URL ??
       'https://ai-toy-fastapi.onrender.com',
   }),
-  tagTypes: ['health', 'toy', 'parents', 'children', 'curriculum', 'sessions'],
+  tagTypes: ['health', 'toy', 'parents', 'children', 'curriculum', 'sessions', 'auth'],
   endpoints: () => ({}),
 });

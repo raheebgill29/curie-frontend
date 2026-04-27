@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Curiouser app icon</title>
+  <rect width="512" height="512" rx="116" fill="#5C707A"/>
+  <circle cx="256" cy="256" r="154" fill="#3f4d51"/>
+  <path d="M256 101c43 75 80 112 155 155-75 43-112 80-155 155-43-75-80-112-155-155 75-43 112-80 155-155Z" fill="#c98b2c"/>
+  <circle cx="256" cy="256" r="62" fill="#bf5f49"/>
+  <path d="M219 244c15-19 59-19 74 0M212 295c23 30 65 30 88 0" fill="none" stroke="#f7f2eb" stroke-width="18" stroke-linecap="round"/>
+</svg>
