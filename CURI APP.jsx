@@ -1,6 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import { useHealthCheckHealthGetQuery } from "./src/lib/api/generated/healthApi";
+import {
+  useGetChildChildrenChildIdGetQuery,
+  useGetChildInsightsChildrenChildIdInsightsGetQuery,
+  useGetChildProgressChildrenChildIdProgressGetQuery,
+} from "./src/lib/api/generated/childrenApi";
+import {
+  useGetLessonsByThemeThemesThemeIdLessonsGetQuery,
+  useGetThemesThemesGetQuery,
+} from "./src/lib/api/generated/curriculumApi";
+import { useGetChildSessionsSessionsChildIdGetQuery } from "./src/lib/api/generated/sessionsApi";
+import { useGenerateSessionToyGenerateSessionPostMutation } from "./src/lib/api/generated/toyApi";
 
 // ── Brand Palette ─────────────────────────────────────────────────────────────
 const B = {
@@ -59,6 +71,111 @@ const AI_INSIGHTS = [
   { icon:"🧠", text:"Questions about natural phenomena are infrequent — consider nature exploration", domain:"UW" },
   { icon:"🎨", text:"Creative movement expression is above average for his age — keep nurturing it!", domain:"CA" },
 ];
+
+const DEMO_CHILD_ID = Number(process.env.NEXT_PUBLIC_DEMO_CHILD_ID || 1) || 1;
+
+const DOMAIN_SCORE_KEYS = {
+  physical: ["physical", "physical_development", "physical development", "pd"],
+  communication: ["communication", "communication_language", "communication_and_language", "communication & language", "cl"],
+  creative: ["creative", "creative_arts", "creative arts", "creative_arts_and_design", "ca"],
+  mathematics: ["mathematics", "maths", "math", "ma"],
+  world: ["world", "understanding_world", "understanding_the_world", "understanding world", "uw"],
+  pse: ["pse", "personal_social", "personal_social_emotional", "personal social", "personal & social"],
+  literacy: ["literacy", "li"],
+};
+
+const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAY_SHORTS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const INSIGHT_ICONS = ["💬", "🧠", "🎨"];
+
+function normalizeKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function getLatestProgressScores(progressData) {
+  const progress = progressData?.progress || [];
+  return progress.length ? progress[progress.length - 1]?.scores || {} : {};
+}
+
+function getDomainScore(scores, domain) {
+  const normalizedScores = Object.entries(scores).reduce((acc, [key, value]) => {
+    acc[normalizeKey(key)] = value;
+    return acc;
+  }, {});
+  const aliases = DOMAIN_SCORE_KEYS[domain.key] || [domain.key];
+  const matchedKey = aliases.map(normalizeKey).find(key => normalizedScores[key] != null);
+  return matchedKey ? normalizedScores[matchedKey] : domain.score;
+}
+
+function mapProgressToDomains(progressData) {
+  const latestScores = getLatestProgressScores(progressData);
+  return EYFS_DOMAINS.map(domain => ({
+    ...domain,
+    score: Math.max(0, Math.min(100, Number(getDomainScore(latestScores, domain)) || domain.score)),
+  }));
+}
+
+function mapInsights(insightsData) {
+  const apiInsights = insightsData?.insights || [];
+  if (!apiInsights.length) return AI_INSIGHTS;
+
+  return apiInsights.slice(0, 3).map((item, index) => ({
+    icon: INSIGHT_ICONS[index % INSIGHT_ICONS.length],
+    text: item.insight,
+    domain: "AI",
+  }));
+}
+
+function lessonToPlanDay(lesson, index) {
+  const dayIndex = Math.max(0, Math.min(6, (lesson.day_number || index + 1) - 1));
+  const learningGoals = lesson.learning_goals || {};
+  const contentJson = learningGoals.content_json || {};
+  const socratic = contentJson.seven_step_structure?.step_4_socratic;
+  const questions = [
+    socratic?.opening_question,
+    ...Object.values(socratic?.age_profiles || {}).flatMap(profile => [
+      profile?.guiding_question,
+      profile?.extension_question,
+    ]),
+  ].filter(Boolean).slice(0, 2);
+  const content = [
+    learningGoals.title,
+    contentJson.ai_action,
+    contentJson.activity_narrative,
+    ...(contentJson.learning_goals || []),
+  ].filter(Boolean).slice(0, 3);
+
+  return {
+    day: DAY_SHORTS[dayIndex],
+    label: DAY_LABELS[dayIndex],
+    focus: (learningGoals.eyfs_focus || []).join(" + ") || learningGoals.subject_lens || "EYFS Learning",
+    type: lesson.lesson_type || "Guided Session",
+    status: dayIndex === 0 ? "done" : dayIndex === 1 ? "today" : "upcoming",
+    time: "Curious Buddy",
+    score: dayIndex === 0 ? 5 : null,
+    participation: dayIndex === 0 ? 92 : null,
+    content: content.length ? content : ["AI-guided lesson content", "Socratic conversation prompts"],
+    aiLog: null,
+    questions,
+    lessonId: lesson.id,
+  };
+}
+
+function mapLessonsToWeeklyPlan(lessons) {
+  return lessons?.length ? lessons.map(lessonToPlanDay) : WEEKLY_PLAN;
+}
+
+function getAgeLabel(dob) {
+  if (!dob) return "Age 3";
+  const birthDate = new Date(dob);
+  if (Number.isNaN(birthDate.getTime())) return "Age 3";
+  const today = new Date();
+  const age = today.getFullYear() - birthDate.getFullYear();
+  const hadBirthday =
+    today.getMonth() > birthDate.getMonth() ||
+    (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
+  return `Age ${hadBirthday ? age : age - 1}`;
+}
 
 // ── Radar Chart ───────────────────────────────────────────────────────────────
 function RadarChart({ domains, size = 210, onSelect }) {
@@ -225,6 +342,17 @@ function DomainSheet({ domain, onClose, onEnhance }) {
 
 // ── Day Sheet ─────────────────────────────────────────────────────────────────
 function DaySheet({ day, onClose }) {
+  const [generateSession, { data: generatedSession, isLoading: isGenerating, isError: didGenerateFail }] = useGenerateSessionToyGenerateSessionPostMutation();
+  const startSession = () => {
+    if (!day.lessonId) return;
+    generateSession({
+      generateSessionRequest: {
+        child_id: DEMO_CHILD_ID,
+        lesson_id: day.lessonId,
+      },
+    });
+  };
+
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(63,77,81,0.85)", display:"flex", alignItems:"flex-end", zIndex:999, backdropFilter:"blur(6px)" }}>
       <div style={{ width:"100%", background:B.bgDeep, borderRadius:"22px 22px 0 0", padding:"24px 22px 44px", maxHeight:"87vh", overflowY:"auto", border:`1px solid ${B.creamLow}`, borderBottom:"none" }}>
@@ -242,6 +370,21 @@ function DaySheet({ day, onClose }) {
             <span style={{ color:B.creamMid, fontSize:14, lineHeight:1.5 }}>{c}</span>
           </div>
         ))}
+
+        {day.lessonId && (
+          <div style={{ margin:"18px 0", background:B.creamFade, borderRadius:14, padding:14, border:`1px solid ${B.creamLow}` }}>
+            <button onClick={startSession}
+              style={{ width:"100%", padding:12, borderRadius:11, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isGenerating?"default":"pointer", fontFamily:"Georgia, serif" }}>
+              {isGenerating ? "Starting Curious Buddy..." : "Start AI Toy Session"}
+            </button>
+            {generatedSession && (
+              <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.55, marginTop:12 }}>
+                <strong style={{ color:B.gold }}>First message:</strong> {generatedSession.first_message}
+              </p>
+            )}
+            {didGenerateFail && <p style={{ color:B.terra, fontSize:12, marginTop:10 }}>Could not start this session. Check the backend data for this child and lesson.</p>}
+          </div>
+        )}
 
         {day.questions.length>0 && (
           <>
@@ -292,7 +435,13 @@ function DaySheet({ day, onClose }) {
 function TabDashboard({ onNudge }) {
   const [mode, setMode] = useState("Learning");
   const [vol, setVol] = useState(70);
+  const { data: health, isFetching: isHealthFetching } = useHealthCheckHealthGetQuery();
+  const { data: sessions } = useGetChildSessionsSessionsChildIdGetQuery({ childId: DEMO_CHILD_ID, page: 1, pageSize: 5 });
+  const { data: insightsData } = useGetChildInsightsChildrenChildIdInsightsGetQuery({ childId: DEMO_CHILD_ID });
   const modes = ["Learning","Sleep","Free Chat"];
+  const aiInsights = mapInsights(insightsData);
+  const onlineLabel = health?.status ? "Curious Buddy Online" : isHealthFetching ? "Checking Buddy Status" : "Curious Buddy Offline";
+  const latestSession = sessions?.items?.[0];
 
   return (
     <div style={{ padding:"0 20px 110px" }}>
@@ -301,11 +450,11 @@ function TabDashboard({ onNudge }) {
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
           <div>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-              <div style={{ width:8, height:8, borderRadius:"50%", background:B.gold, boxShadow:`0 0 10px ${B.gold}` }} />
-              <span style={{ color:B.gold, fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase" }}>Curious Buddy Online</span>
+              <div style={{ width:8, height:8, borderRadius:"50%", background:health?.status ? B.gold : B.terra, boxShadow:`0 0 10px ${health?.status ? B.gold : B.terra}` }} />
+              <span style={{ color:health?.status ? B.gold : B.terra, fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase" }}>{onlineLabel}</span>
             </div>
             <p style={{ color:B.cream, fontWeight:700, fontSize:15, fontFamily:"Georgia, serif", lineHeight:1.4 }}>Body Awareness · Songs & Movement</p>
-            <p style={{ color:B.creamMid, fontSize:12, marginTop:4 }}>18 min elapsed · Round 3 of 6</p>
+            <p style={{ color:B.creamMid, fontSize:12, marginTop:4 }}>{latestSession ? `Latest session #${latestSession.id}` : "18 min elapsed · Round 3 of 6"}</p>
           </div>
           <div style={{ width:52, height:52, borderRadius:16, background:B.goldFade, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, border:`1px solid rgba(201,139,44,0.25)` }}>
             🧸
@@ -320,7 +469,7 @@ function TabDashboard({ onNudge }) {
       {/* Stats */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
         {[
-          { label:"Today's Session", value:"28 min", sub:"+5 min vs yesterday", color:B.gold },
+          { label:"Sessions", value:sessions?.total ?? "—", sub:"Loaded from backend", color:B.gold },
           { label:"This Week",       value:"1 / 7",  sub:"Monday complete",    color:B.terra },
         ].map(s => (
           <div key={s.label} style={{ background:B.bgDeep, borderRadius:16, padding:18, border:`1px solid ${B.creamLow}` }}>
@@ -334,8 +483,8 @@ function TabDashboard({ onNudge }) {
       {/* AI Insights */}
       <div style={{ background:B.bgDeep, borderRadius:20, padding:20, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>Today's AI Insights</SectionLabel>
-        {AI_INSIGHTS.map((ins,i) => (
-          <div key={i} style={{ display:"flex", gap:13, marginBottom:i<AI_INSIGHTS.length-1?16:0, paddingBottom:i<AI_INSIGHTS.length-1?16:0, borderBottom:i<AI_INSIGHTS.length-1?`1px solid ${B.creamLow}`:"none" }}>
+        {aiInsights.map((ins,i) => (
+          <div key={i} style={{ display:"flex", gap:13, marginBottom:i<aiInsights.length-1?16:0, paddingBottom:i<aiInsights.length-1?16:0, borderBottom:i<aiInsights.length-1?`1px solid ${B.creamLow}`:"none" }}>
             <span style={{ fontSize:17, lineHeight:1.5 }}>{ins.icon}</span>
             <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.6 }}>{ins.text}</p>
           </div>
@@ -366,17 +515,21 @@ function TabDashboard({ onNudge }) {
 function TabGrowth() {
   const [selectedDomain, setSelectedDomain] = useState(null);
   const [enhanced, setEnhanced] = useState([]);
+  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId: DEMO_CHILD_ID });
+  const { data: progressData, isFetching, isError } = useGetChildProgressChildrenChildIdProgressGetQuery({ childId: DEMO_CHILD_ID });
+  const domains = mapProgressToDomains(progressData);
+  const childName = child?.name || "Leo";
   return (
     <div style={{ padding:"0 20px 110px" }}>
       <div style={{ background:B.bgDeep, borderRadius:20, padding:24, marginBottom:14, textAlign:"center", border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>EYFS Development Radar</SectionLabel>
-        <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:4, fontFamily:"Georgia, serif" }}>Leo's Growth Profile</p>
-        <p style={{ color:B.creamMid, fontSize:12, marginBottom:22 }}>Tap any dimension to view details & boost</p>
+        <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:4, fontFamily:"Georgia, serif" }}>{childName}'s Growth Profile</p>
+        <p style={{ color:B.creamMid, fontSize:12, marginBottom:22 }}>{isFetching ? "Loading backend progress..." : isError ? "Showing saved demo progress" : "Tap any dimension to view details & boost"}</p>
         <div style={{ display:"flex", justifyContent:"center" }}>
-          <RadarChart domains={EYFS_DOMAINS} size={220} onSelect={setSelectedDomain} />
+          <RadarChart domains={domains} size={220} onSelect={setSelectedDomain} />
         </div>
         <div style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center", marginTop:18 }}>
-          {EYFS_DOMAINS.map(d => (
+          {domains.map(d => (
             <div key={d.key} style={{ display:"flex", alignItems:"center", gap:5 }}>
               <div style={{ width:7, height:7, borderRadius:"50%", background:d.color }} />
               <span style={{ fontSize:10, color:B.creamMid, fontFamily:"Georgia, serif" }}>{d.short}</span>
@@ -385,7 +538,7 @@ function TabGrowth() {
         </div>
       </div>
 
-      {EYFS_DOMAINS.map(d => (
+      {domains.map(d => (
         <div key={d.key} onClick={()=>setSelectedDomain(d)}
           style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:10, cursor:"pointer", border:`1px solid ${enhanced.includes(d.key) ? "rgba(201,139,44,0.4)" : B.creamLow}`, transition:"border 0.3s" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
@@ -421,6 +574,11 @@ function TabCurriculum() {
   const [generated, setGenerated] = useState(false);
   const goalOptions     = ["Communication","Maths & Logic","Creative Arts","Social & Emotional","Nature & Science"];
   const interestOptions = ["Dinosaurs","Space","Ocean","Animals","Superheroes","Cooking"];
+  const { data: themes = [], isFetching: isLoadingThemes } = useGetThemesThemesGetQuery();
+  const selectedTheme = themes[0];
+  const { data: lessons = [], isFetching: isLoadingLessons } = useGetLessonsByThemeThemesThemeIdLessonsGetQuery({ themeId: selectedTheme?.id || 1 });
+  const weeklyPlan = mapLessonsToWeeklyPlan(lessons);
+  const themeTitle = selectedTheme?.title || "Body Awareness";
 
   if (building) {
     const stepLabels = ["Goals","Interests","Generate","Sync"];
@@ -527,12 +685,12 @@ function TabCurriculum() {
       {/* Week header */}
       <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>This Week's Theme</SectionLabel>
-        <p style={{ color:B.cream, fontSize:24, fontWeight:700, marginBottom:12, fontFamily:"Georgia, serif" }}>Body Awareness 🧍</p>
+        <p style={{ color:B.cream, fontSize:24, fontWeight:700, marginBottom:12, fontFamily:"Georgia, serif" }}>{themeTitle} 🧍</p>
         <div style={{ display:"flex", gap:20 }}>
           {[
-            { label:"Progress",     value:"1 / 7" },
+            { label:"Progress",     value:`${Math.min(1, weeklyPlan.length)} / ${weeklyPlan.length || 7}` },
             { label:"Avg Engagement",value:"92%"  },
-            { label:"EYFS Focus",   value:"PD + PSE" },
+            { label:"Backend",   value:isLoadingThemes || isLoadingLessons ? "Syncing" : selectedTheme ? "Live" : "Demo" },
           ].map(s => (
             <div key={s.label}>
               <p style={{ color:B.creamMid, fontSize:10, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{s.label}</p>
@@ -542,8 +700,8 @@ function TabCurriculum() {
         </div>
       </div>
 
-      {WEEKLY_PLAN.map(day => (
-        <div key={day.day} onClick={()=>setSelectedDay(day)}
+      {weeklyPlan.map(day => (
+        <div key={day.lessonId || day.day} onClick={()=>setSelectedDay(day)}
           style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:10, cursor:"pointer", border:day.status==="today"?`1px solid rgba(191,95,73,0.5)`:  `1px solid ${B.creamLow}`, transition:"border 0.2s" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
             <div style={{ display:"flex", gap:13, alignItems:"center" }}>
@@ -582,6 +740,8 @@ function TabCurriculum() {
 
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
 function TabProfile() {
+  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId: DEMO_CHILD_ID });
+  const childName = child?.name || "Leo";
   return (
     <div style={{ padding:"0 20px 110px" }}>
       <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, display:"flex", gap:16, alignItems:"center", border:`1px solid ${B.creamLow}` }}>
@@ -589,9 +749,9 @@ function TabProfile() {
           👧
         </div>
         <div>
-          <p style={{ color:B.cream, fontSize:21, fontWeight:700, fontFamily:"Georgia, serif" }}>Leo</p>
-          <p style={{ color:B.creamMid, fontSize:13 }}>Age 3 · EYFS Growth Profile</p>
-          <p style={{ color:B.gold, fontSize:12, marginTop:3, fontFamily:"Georgia, serif" }}>✦ 12 weeks of learning data</p>
+          <p style={{ color:B.cream, fontSize:21, fontWeight:700, fontFamily:"Georgia, serif" }}>{childName}</p>
+          <p style={{ color:B.creamMid, fontSize:13 }}>{getAgeLabel(child?.dob)} · EYFS Growth Profile</p>
+          <p style={{ color:B.gold, fontSize:12, marginTop:3, fontFamily:"Georgia, serif" }}>✦ Child ID {child?.id || DEMO_CHILD_ID}</p>
         </div>
       </div>
 
