@@ -42,6 +42,16 @@ const injectedRtkApi = api
         }),
         providesTags: ["children"],
       }),
+      getChildCurriculumBoardChildrenChildIdCurriculumBoardGet: build.query<
+        CurriculumBoardResponse,
+        GetChildCurriculumBoardChildrenChildIdCurriculumBoardGetApiArg
+      >({
+        query: (queryArg) => ({
+          url: `/children/${queryArg.childId}/curriculum-board`,
+          params: { theme_id: queryArg.themeId },
+        }),
+        providesTags: ["children"],
+      }),
     }),
     overrideExisting: false,
   });
@@ -104,9 +114,31 @@ export type ChildInsightsResponse = {
   child_id: number;
   insights: InsightSchema[];
 };
+export type CurriculumBoardLesson = {
+  lesson_id: number;
+  day_number: number;
+  lesson_type: string;
+  vocabulary?: unknown;
+  learning_goals?: Record<string, unknown>;
+  status: string;
+  engagement_percentage?: number;
+};
+export type CurriculumBoardResponse = {
+  child_id: number;
+  theme_id: number;
+  theme_title: string;
+  week_number: number;
+  duration_days: number;
+  lessons: CurriculumBoardLesson[];
+};
+export type GetChildCurriculumBoardChildrenChildIdCurriculumBoardGetApiArg = {
+  childId: number;
+  themeId: number;
+};
 export const {
   useCreateChildChildrenPostMutation,
   useGetChildChildrenChildIdGetQuery,
   useGetChildProgressChildrenChildIdProgressGetQuery,
   useGetChildInsightsChildrenChildIdInsightsGetQuery,
+  useGetChildCurriculumBoardChildrenChildIdCurriculumBoardGetQuery,
 } = injectedRtkApi;

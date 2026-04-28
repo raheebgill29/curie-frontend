@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useHealthCheckHealthGetQuery } from "./src/lib/api/generated/healthApi";
 import {
   useCreateChildChildrenPostMutation,
   useGetChildChildrenChildIdGetQuery,
+  useGetChildCurriculumBoardChildrenChildIdCurriculumBoardGetQuery,
   useGetChildInsightsChildrenChildIdInsightsGetQuery,
   useGetChildProgressChildrenChildIdProgressGetQuery,
 } from "./src/lib/api/generated/childrenApi";
 import {
   useCreateLessonLessonsPostMutation,
   useCreateThemeThemesPostMutation,
-  useGetLessonsByThemeThemesThemeIdLessonsGetQuery,
   useGetThemesThemesGetQuery,
   usePreviewLessonLessonsLessonIdPreviewGetQuery,
 } from "./src/lib/api/generated/curriculumApi";
@@ -57,30 +57,6 @@ const EYFS_DOMAINS = [
   { key: "world",         label: "Understanding World",   short: "UW",  score: 50, color: "#7ab89a" },
   { key: "pse",           label: "Personal & Social",     short: "PSE", score: 70, color: B.gold },
   { key: "literacy",      label: "Literacy",              short: "LI",  score: 45, color: B.terra },
-];
-
-const WEEKLY_PLAN = [
-  {
-    day:"Mon", label:"Monday", focus:"Physical Development",
-    type:"Songs + Movement", status:"done", time:"8:30–8:50",
-    score:5, participation:92,
-    content:["Head Shoulders Knees & Toes","Body Guard Song","5 interactive movement rounds"],
-    aiLog:"Leo did brilliantly today! He accurately identified all body parts and creatively used his arms to mimic a giraffe. Both Physical Development and Creative Arts showed notable improvement.",
-    questions:["Can you point to where your knees are?","If your arms were really, really long, what fun things could you do?"],
-  },
-  {
-    day:"Tue", label:"Tuesday", focus:"Communication & Language",
-    type:"Story + Discussion", status:"today", time:"8:30–8:55",
-    score:null, participation:null,
-    content:["2 body-themed stories","Socratic Q&A session"],
-    aiLog:null,
-    questions:["Why did the little bear go to the doctor in the story?","If you were the little bear, what would you do?"],
-  },
-  { day:"Wed", label:"Wednesday", focus:"Creative Arts",        type:"Drama + Role-play",     status:"upcoming", time:"8:30–9:00", score:null, participation:null, content:["Guided role-play script","Creative body expression"],    aiLog:null, questions:[] },
-  { day:"Thu", label:"Thursday",  focus:"Understanding World",  type:"Science Exploration",   status:"upcoming", time:"8:30–8:50", score:null, participation:null, content:["Natural phenomena exploration","Animal classification game"], aiLog:null, questions:[] },
-  { day:"Fri", label:"Friday",    focus:"Mathematics",          type:"Maths Games + Puzzles", status:"upcoming", time:"8:30–8:45", score:null, participation:null, content:["Number matching activity","Shape & block challenge"],        aiLog:null, questions:[] },
-  { day:"Sat", label:"Saturday",  focus:"PSE",                  type:"Social Role-play",      status:"upcoming", time:"10:00–10:30",score:null, participation:null, content:["Emotion expression game","Collaborative problem-solving"],   aiLog:null, questions:[] },
-  { day:"Sun", label:"Sunday",    focus:"Weekly Review",        type:"Free Talk + Review",    status:"upcoming", time:"Free play",  score:null, participation:null, content:["Weekly knowledge recap","Open-ended free conversation"],     aiLog:null, questions:[] },
 ];
 
 const AI_INSIGHTS = [
@@ -153,21 +129,6 @@ function toVocabulary(interests, goals) {
     : FALLBACK_VOCABULARY.slice(0, 3);
 }
 
-const LESSON_TYPE_LABELS = {
-  story_and_discussion: "Story + Discussion",
-  song_and_movement: "Songs + Movement",
-  drama_and_role_play: "Drama + Role-play",
-  science_exploration: "Science Exploration",
-  mathematics: "Mathematics",
-};
-
-function formatLessonTypeLabel(lesson) {
-  const raw = String(lesson?.type || "");
-  if (raw.includes("_") && LESSON_TYPE_LABELS[raw]) return LESSON_TYPE_LABELS[raw];
-  if (Object.values(LESSON_TYPE_LABELS).includes(raw)) return raw;
-  return raw || "Session";
-}
-
 function getLatestProgressScores(progressData) {
   const progress = progressData?.progress || [];
   return progress.length ? progress[progress.length - 1]?.scores || {} : {};
@@ -202,66 +163,156 @@ function mapInsights(insightsData) {
   }));
 }
 
-function lessonToPlanDay(lesson, index) {
-  const dayIndex = Math.max(0, Math.min(6, (lesson.day_number || index + 1) - 1));
+function humanizeLessonTypeUnderscores(lessonType) {
+  if (lessonType == null || lessonType === "") return "Session";
+  return String(lessonType)
+    .split("_")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function normalizeBoardStatus(status) {
+  return String(status || "").toLowerCase() === "completed" ? "completed" : "upcoming";
+}
+
+function normalizeVocabularyTags(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw.map((x) => String(x).trim()).filter(Boolean);
+  if (typeof raw === "object") return Object.values(raw).flatMap(normalizeVocabularyTags);
+  const s = String(raw).trim();
+  return s ? [s] : [];
+}
+
+function extractSocraticQuestions(sevenStep) {
+  const soc = sevenStep?.step_4_socratic;
+  if (!soc || typeof soc !== "object") return [];
+  const qs = [
+    soc.opening_question,
+    ...Object.values(soc.age_profiles || {}).flatMap((profile) =>
+      profile && typeof profile === "object"
+        ? [profile.guiding_question, profile.extension_question].filter(Boolean)
+        : [],
+    ),
+  ].filter(Boolean);
+  return qs.slice(0, 4);
+}
+
+function sessionPlanFallbackLines(learningGoals, contentJson) {
+  const lines = [
+    learningGoals?.title,
+    learningGoals?.subject_lens,
+    contentJson?.ai_action,
+    contentJson?.activity_narrative,
+    ...(Array.isArray(contentJson?.learning_goals) ? contentJson.learning_goals : []),
+    ...(Array.isArray(learningGoals?.eyfs_focus) ? learningGoals.eyfs_focus : []),
+  ].filter(Boolean);
+  return lines.length ? lines : ["Session details will appear when available."];
+}
+
+function prettySevenStepKey(key) {
+  return String(key)
+    .replace(/^step_\d+_/, "")
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function SevenStepValue({ value, depth }) {
+  if (value == null) return null;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return (
+      <p style={{ color: B.creamMid, fontSize: 14, lineHeight: 1.55, marginBottom: depth ? 6 : 10 }}>
+        {String(value)}
+      </p>
+    );
+  }
+  if (Array.isArray(value)) {
+    return (
+      <ul style={{ margin: "6px 0 10px", paddingLeft: 18, color: B.creamMid, fontSize: 13, lineHeight: 1.55 }}>
+        {value.map((item, i) => (
+          <li key={i} style={{ marginBottom: 6 }}>
+            <SevenStepValue value={item} depth={depth + 1} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <div style={{ paddingLeft: depth ? 10 : 0 }}>
+      {Object.entries(value).map(([k, v]) => (
+        <div key={k} style={{ marginBottom: 10 }}>
+          <p style={{ color: B.creamMid, fontSize: 11, fontWeight: 700, marginBottom: 4 }}>{prettySevenStepKey(k)}</p>
+          <SevenStepValue value={v} depth={depth + 1} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SevenStepSessionPlan({ structure }) {
+  if (!structure || typeof structure !== "object") return null;
+  const preferredOrder = [
+    "step_1_hook",
+    "step_2_core_activity",
+    "step_3_do",
+    "step_4_socratic",
+    "step_5_extension",
+    "step_6_reflection",
+  ];
+  const keys = [...new Set([...preferredOrder.filter((k) => k in structure), ...Object.keys(structure)])];
+  return (
+    <>
+      {keys.map((key) => (
+        <div key={key} style={{ marginBottom: 14 }}>
+          <p style={{ color: B.gold, fontSize: 11, fontWeight: 700, marginBottom: 8, fontFamily: "Georgia, serif" }}>
+            {prettySevenStepKey(key)}
+          </p>
+          <SevenStepValue value={structure[key]} depth={0} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function mapCurriculumBoardLessonToDay(lesson) {
+  const dayIndex = Math.max(0, Math.min(6, (lesson.day_number || 1) - 1));
   const learningGoals = lesson.learning_goals || {};
-  const contentJson = learningGoals.content_json || {};
-  const socratic = contentJson.seven_step_structure?.step_4_socratic;
-  const questions = [
-    socratic?.opening_question,
-    ...Object.values(socratic?.age_profiles || {}).flatMap(profile => [
-      profile?.guiding_question,
-      profile?.extension_question,
-    ]),
-  ].filter(Boolean).slice(0, 2);
-  const content = [
-    learningGoals.title,
-    contentJson.ai_action,
-    contentJson.activity_narrative,
-    ...(contentJson.learning_goals || []),
-  ].filter(Boolean).slice(0, 3);
+  const contentJson =
+    typeof learningGoals.content_json === "object" && learningGoals.content_json !== null
+      ? learningGoals.content_json
+      : {};
+  const sevenStep = contentJson.seven_step_structure;
+  const status = normalizeBoardStatus(lesson.status);
+  const engRaw = lesson.engagement_percentage;
+  const engagementPercentage =
+    typeof engRaw === "number" && !Number.isNaN(engRaw)
+      ? Math.max(0, Math.min(100, Math.round(engRaw)))
+      : 0;
 
   return {
+    lessonId: lesson.lesson_id,
     day: DAY_SHORTS[dayIndex],
     label: DAY_LABELS[dayIndex],
-    focus: (learningGoals.eyfs_focus || []).join(" + ") || learningGoals.subject_lens || "EYFS Learning",
-    type: formatLessonTypeLabel({ type: lesson.lesson_type || "Guided Session" }),
-    status: dayIndex === 0 ? "done" : dayIndex === 1 ? "today" : "upcoming",
+    focus:
+      (Array.isArray(learningGoals.eyfs_focus) && learningGoals.eyfs_focus.join(" + ")) ||
+      (typeof learningGoals.subject_lens === "string"
+        ? learningGoals.subject_lens
+        : Array.isArray(learningGoals.subject_lens)
+          ? learningGoals.subject_lens.join(" + ")
+          : "") ||
+      "Learning focus",
+    type: humanizeLessonTypeUnderscores(lesson.lesson_type),
+    status,
     time: "Curious Buddy",
-    score: dayIndex === 0 ? 5 : null,
-    participation: dayIndex === 0 ? 92 : null,
-    content: content.length ? content : ["AI-guided lesson content", "Socratic conversation prompts"],
-    aiLog: null,
-    questions,
-    lessonId: lesson.id,
+    engagementPercentage,
+    sevenStepStructure: sevenStep && typeof sevenStep === "object" ? sevenStep : null,
+    learningGoals,
+    contentJson,
+    vocabularyTags: normalizeVocabularyTags(lesson.vocabulary),
+    contentFallback: sessionPlanFallbackLines(learningGoals, contentJson),
+    questions: extractSocraticQuestions(sevenStep),
   };
-}
-
-function mapLessonsToWeeklyPlan(lessons) {
-  return lessons?.length ? lessons.map(lessonToPlanDay) : WEEKLY_PLAN;
-}
-
-const TUESDAY_DEMO = WEEKLY_PLAN[1];
-
-function withStaticTuesdayContent(days) {
-  if (!days?.length) return WEEKLY_PLAN;
-  const next = [...days];
-  if (next.length < 2) return next;
-  const dynamicTue = next[1] || {};
-  next[1] = {
-    ...TUESDAY_DEMO,
-    type: formatLessonTypeLabel(dynamicTue) || TUESDAY_DEMO.type,
-    focus: dynamicTue.focus || TUESDAY_DEMO.focus,
-    lessonId: dynamicTue.lessonId,
-    time: TUESDAY_DEMO.time,
-    content: TUESDAY_DEMO.content,
-    questions: TUESDAY_DEMO.questions,
-    aiLog: TUESDAY_DEMO.aiLog,
-    status: "done",
-    score: 5,
-    participation: 88,
-  };
-  return next;
 }
 
 function getAgeLabel(dob) {
@@ -406,16 +457,13 @@ function ProgressBar({ value, color, height=5 }) {
 
 function Badge({ status }) {
   const map = {
-    done:     { label:"Completed",  bg:"rgba(201,139,44,0.18)",  color:B.gold  },
-    today:    { label:"Today",      bg:"rgba(191,95,73,0.22)",   color:B.terra },
-    upcoming: { label:"Upcoming",   bg:"rgba(247,242,235,0.08)", color:B.creamMid },
+    done:       { label:"Completed",  bg:"rgba(201,139,44,0.18)",  color:B.gold  },
+    completed:  { label:"Completed",  bg:"rgba(201,139,44,0.18)",  color:B.gold  },
+    today:      { label:"Today",      bg:"rgba(191,95,73,0.22)",   color:B.terra },
+    upcoming:   { label:"Upcoming",   bg:"rgba(247,242,235,0.08)", color:B.creamMid },
   };
-  const s = map[status];
+  const s = map[status] || map.upcoming;
   return <span style={{ fontSize:10, fontWeight:700, padding:"3px 9px", borderRadius:99, background:s.bg, color:s.color, letterSpacing:"0.04em", textTransform:"uppercase" }}>{s.label}</span>;
-}
-
-function Stars({ n }) {
-  return <span style={{ color:B.gold, fontSize:14, letterSpacing:2 }}>{"★".repeat(n)}{"☆".repeat(5-n)}</span>;
 }
 
 // ── Divider ───────────────────────────────────────────────────────────────────
@@ -573,12 +621,42 @@ function DaySheet({ day, childId, onClose }) {
 
         <Divider />
         <SectionLabel>Session Plan</SectionLabel>
-        {day.content.map((c,i) => (
-          <div key={i} style={{ display:"flex", gap:12, marginBottom:10, alignItems:"flex-start" }}>
-            <span style={{ color:B.gold, fontSize:11, fontWeight:700, minWidth:22, fontFamily:"Georgia, serif" }}>0{i+1}</span>
-            <span style={{ color:B.creamMid, fontSize:14, lineHeight:1.5 }}>{c}</span>
-          </div>
-        ))}
+        {day.sevenStepStructure && Object.keys(day.sevenStepStructure).length > 0 ? (
+          <SevenStepSessionPlan structure={day.sevenStepStructure} />
+        ) : (
+          (day.contentFallback || []).map((c, i) => (
+            <div key={i} style={{ display:"flex", gap:12, marginBottom:10, alignItems:"flex-start" }}>
+              <span style={{ color:B.gold, fontSize:11, fontWeight:700, minWidth:22, fontFamily:"Georgia, serif" }}>
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <span style={{ color:B.creamMid, fontSize:14, lineHeight:1.5 }}>{c}</span>
+            </div>
+          ))
+        )}
+
+        {(day.vocabularyTags?.length ?? 0) > 0 && (
+          <>
+            <Divider />
+            <SectionLabel>Vocabulary</SectionLabel>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:6 }}>
+              {day.vocabularyTags.map((tag, i) => (
+                <span
+                  key={i}
+                  style={{
+                    fontSize:12,
+                    padding:"5px 11px",
+                    borderRadius:99,
+                    background:B.creamFade,
+                    color:B.creamMid,
+                    border:`1px solid ${B.creamLow}`,
+                  }}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
 
         {day.lessonId && (
           <div style={{ margin:"18px 0", background:B.creamFade, borderRadius:14, padding:14, border:`1px solid ${B.creamLow}` }}>
@@ -631,7 +709,7 @@ function DaySheet({ day, childId, onClose }) {
           </div>
         )}
 
-        {day.questions.length>0 && (
+        {(day.questions?.length ?? 0) > 0 && (
           <>
             <Divider />
             <SectionLabel>Socratic Questions</SectionLabel>
@@ -654,21 +732,17 @@ function DaySheet({ day, childId, onClose }) {
           </>
         )}
 
-        {day.status==="done" && (
-          <>
-            <Divider />
-            <SectionLabel>Performance</SectionLabel>
-            <div style={{ display:"flex", gap:12, marginBottom:18 }}>
-              <div style={{ flex:1, background:B.creamFade, borderRadius:12, padding:14, textAlign:"center", border:`1px solid ${B.creamLow}` }}>
-                <Stars n={day.score} /><p style={{ color:B.creamMid, fontSize:11, marginTop:5 }}>Overall Rating</p>
-              </div>
-              <div style={{ flex:1, background:B.creamFade, borderRadius:12, padding:14, textAlign:"center", border:`1px solid ${B.creamLow}` }}>
-                <p style={{ color:B.gold, fontSize:24, fontWeight:700, fontFamily:"Georgia, serif" }}>{day.participation}%</p>
-                <p style={{ color:B.creamMid, fontSize:11 }}>Engagement</p>
-              </div>
-            </div>
-          </>
-        )}
+        <>
+          <Divider />
+          <SectionLabel>Engagement</SectionLabel>
+          <div style={{ background:B.creamFade, borderRadius:12, padding:14, marginBottom:18, border:`1px solid ${B.creamLow}` }}>
+            <ProgressBar value={day.engagementPercentage ?? 0} color={B.gold} height={6} />
+            <p style={{ color:B.gold, fontSize:22, fontWeight:700, fontFamily:"Georgia, serif", marginTop:10 }}>
+              {day.engagementPercentage ?? 0}%
+            </p>
+            <p style={{ color:B.creamMid, fontSize:11 }}>From your latest session data</p>
+          </div>
+        </>
 
         <button onClick={onClose} style={{ width:"100%", padding:14, borderRadius:12, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, cursor:"pointer", fontWeight:600 }}>Close</button>
       </div>
@@ -833,13 +907,28 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
   const goalOptions     = ["Communication","Maths & Logic","Creative Arts","Social & Emotional","Nature & Science"];
   const interestOptions = ["Dinosaurs","Space","Ocean","Animals","Superheroes","Cooking"];
   const { data: themes = [], isFetching: isLoadingThemes } = useGetThemesThemesGetQuery();
-  const selectedTheme = themes[0];
-  const { data: lessons = [], isFetching: isLoadingLessons } = useGetLessonsByThemeThemesThemeIdLessonsGetQuery({ themeId: selectedTheme?.id || 1 });
+  const selectedThemeId = themes[0]?.id;
+  const {
+    data: curriculumBoard,
+    isFetching: isLoadingBoard,
+    isError: isBoardError,
+  } = useGetChildCurriculumBoardChildrenChildIdCurriculumBoardGetQuery(
+    childId && selectedThemeId ? { childId, themeId: selectedThemeId } : skipToken,
+  );
   const [createTheme, { isLoading: isCreatingTheme }] = useCreateThemeThemesPostMutation();
   const [createLesson, { isLoading: isCreatingLesson }] = useCreateLessonLessonsPostMutation();
-  const backendPlan = mapLessonsToWeeklyPlan(lessons);
-  const weeklyPlan = withStaticTuesdayContent(personalizedPlan?.days || backendPlan);
-  const themeTitle = personalizedPlan?.title || selectedTheme?.title || "Body Awareness";
+  const weeklyPlan = useMemo(() => {
+    const lessons = curriculumBoard?.lessons;
+    if (!lessons?.length) return [];
+    return [...lessons]
+      .sort((a, b) => (a.day_number || 0) - (b.day_number || 0))
+      .map(mapCurriculumBoardLessonToDay);
+  }, [curriculumBoard]);
+  const themeTitle = curriculumBoard?.theme_title || themes[0]?.title || "This Week";
+  const completedCount = weeklyPlan.filter((d) => d.status === "completed").length;
+  const avgEngagement = weeklyPlan.length
+    ? Math.round(weeklyPlan.reduce((s, d) => s + (d.engagementPercentage || 0), 0) / weeklyPlan.length)
+    : 0;
   const isSyncingPlan = isCreatingTheme || isCreatingLesson;
   const generatePlan = () => {
     const days = buildPersonalizedPlan({ goals, interests });
@@ -997,9 +1086,22 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
         <p style={{ color:B.cream, fontSize:24, fontWeight:700, marginBottom:12, fontFamily:"Georgia, serif" }}>{themeTitle} 🧍</p>
         <div style={{ display:"flex", gap:20 }}>
           {[
-            { label:"Progress",     value:`${Math.min(1, weeklyPlan.length)} / ${weeklyPlan.length || 7}` },
-            { label:"Avg Engagement",value:"92%"  },
-            { label:"Backend",   value:isLoadingThemes || isLoadingLessons ? "Syncing" : selectedTheme ? "Live" : "Demo" },
+            {
+              label:"Progress",
+              value:`${completedCount} / ${weeklyPlan.length || curriculumBoard?.duration_days || 7}`,
+            },
+            { label:"Avg Engagement", value:`${avgEngagement}%` },
+            {
+              label:"Backend",
+              value:
+                isLoadingThemes || isLoadingBoard
+                  ? "Syncing"
+                  : curriculumBoard
+                    ? "Live"
+                    : isBoardError
+                      ? "Unavailable"
+                      : "—",
+            },
           ].map(s => (
             <div key={s.label}>
               <p style={{ color:B.creamMid, fontSize:10, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{s.label}</p>
@@ -1009,13 +1111,36 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
         </div>
       </div>
 
+      {!isLoadingBoard && weeklyPlan.length === 0 && (
+        <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.6, marginBottom:12 }}>
+          No curriculum lessons for this theme yet. Build or sync a plan, or choose another theme when available.
+        </p>
+      )}
+
       {weeklyPlan.map(day => (
         <div key={day.lessonId || day.day} onClick={()=>setSelectedDay(day)}
-          style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:10, cursor:"pointer", border:day.status==="today"?`1px solid rgba(191,95,73,0.5)`:  `1px solid ${B.creamLow}`, transition:"border 0.2s" }}>
+          style={{
+            background:B.bgDeep,
+            borderRadius:16,
+            padding:18,
+            marginBottom:10,
+            cursor:"pointer",
+            border:day.status==="completed"?`1px solid rgba(201,139,44,0.35)`:`1px solid ${B.creamLow}`,
+            transition:"border 0.2s",
+          }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
             <div style={{ display:"flex", gap:13, alignItems:"center" }}>
-              <div style={{ width:42, height:42, borderRadius:13, background:day.status==="done"?B.goldFade:day.status==="today"?B.terraFade:B.creamFade, display:"flex", alignItems:"center", justifyContent:"center", border:`1px solid ${day.status==="done"?B.gold:day.status==="today"?B.terra:B.creamLow}` }}>
-                <span style={{ fontSize:16 }}>{day.status==="done"?"✦":day.status==="today"?"◎":"◌"}</span>
+              <div style={{
+                width:42,
+                height:42,
+                borderRadius:13,
+                background:day.status==="completed"?B.goldFade:B.creamFade,
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                border:`1px solid ${day.status==="completed"?B.gold:B.creamLow}`,
+              }}>
+                <span style={{ fontSize:16 }}>{day.status==="completed"?"✦":"◌"}</span>
               </div>
               <div>
                 <p style={{ color:B.cream, fontWeight:700, fontSize:14, fontFamily:"Georgia, serif" }}>{day.label}</p>
@@ -1024,16 +1149,12 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
             </div>
             <Badge status={day.status} />
           </div>
-          <div style={{ display:"flex", gap:16, marginBottom:day.status==="done"?10:0 }}>
+          <div style={{ display:"flex", gap:16, marginBottom:10 }}>
             <p style={{ color:B.creamMid, fontSize:11 }}>🎯 {day.focus}</p>
             <p style={{ color:B.creamMid, fontSize:11 }}>⏱ {day.time}</p>
           </div>
-          {day.status==="done" && (
-            <>
-              <ProgressBar value={day.participation} color={B.gold} height={4} />
-              <p style={{ color:B.gold, fontSize:11, marginTop:5 }}>Engagement {day.participation}%</p>
-            </>
-          )}
+          <ProgressBar value={day.engagementPercentage} color={B.gold} height={4} />
+          <p style={{ color:B.gold, fontSize:11, marginTop:5 }}>Engagement {day.engagementPercentage}%</p>
         </div>
       ))}
 
