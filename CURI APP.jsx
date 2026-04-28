@@ -1197,10 +1197,10 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
             </div>
           ))}
 
-          <button onClick={()=>setBuilding(true)}
+          {/* <button onClick={()=>setBuilding(true)}
             style={{ width:"100%", padding:16, borderRadius:16, background:B.gold, color:B.dark, fontWeight:700, fontSize:15, border:"none", cursor:"pointer", marginTop:8, fontFamily:"Georgia, serif", letterSpacing:"0.02em" }}>
             ✦ Build a New Personalised Plan
-          </button>
+          </button> */}
 
           {selectedDay && <DaySheet day={selectedDay} childId={childId} onClose={()=>setSelectedDay(null)} />}
         </>
