@@ -30,23 +30,8 @@ import {
   useGenerateSessionToyGenerateSessionPostMutation,
   useRespondToyRespondPostMutation,
 } from "./src/lib/api/generated/toyApi";
-
-// ── Brand Palette ─────────────────────────────────────────────────────────────
-const B = {
-  bg:       "#5C707A",   // main background — slate teal
-  bgDeep:   "#3f4d51",   // darker panels / nav
-  bgCard:   "#4a6068",   // card surface
-  bgLight:  "#6a7f89",   // lighter surface / hover
-  cream:    "#f7f2eb",   // primary text + light surfaces
-  gold:     "#c98b2c",   // accent / highlights / CTA
-  terra:    "#bf5f49",   // warning / emphasis / secondary CTA
-  dark:     "#3f4d51",   // deep text / nav bg
-  creamFade:"rgba(247,242,235,0.12)",  // subtle card bg
-  creamMid: "rgba(247,242,235,0.55)",  // secondary text
-  creamLow: "rgba(247,242,235,0.25)",  // muted / borders
-  goldFade: "rgba(201,139,44,0.18)",
-  terraFade:"rgba(191,95,73,0.18)",
-};
+import { B } from "./src/lib/brandPalette.js";
+import CurriculumManagement from "./src/components/CurriculumManagement.jsx";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 const EYFS_DOMAINS = [
@@ -276,7 +261,9 @@ function SevenStepSessionPlan({ structure }) {
 }
 
 function mapCurriculumBoardLessonToDay(lesson) {
-  const dayIndex = Math.max(0, Math.min(6, (lesson.day_number || 1) - 1));
+  const dn = lesson.day_number || 1;
+  const label = dn >= 1 && dn <= 7 ? DAY_LABELS[dn - 1] : `Day ${dn}`;
+  const dayShort = dn >= 1 && dn <= 7 ? DAY_SHORTS[dn - 1] : `D${dn}`;
   const learningGoals = lesson.learning_goals || {};
   const contentJson =
     typeof learningGoals.content_json === "object" && learningGoals.content_json !== null
@@ -292,8 +279,8 @@ function mapCurriculumBoardLessonToDay(lesson) {
 
   return {
     lessonId: lesson.lesson_id,
-    day: DAY_SHORTS[dayIndex],
-    label: DAY_LABELS[dayIndex],
+    day: dayShort,
+    label,
     focus:
       (Array.isArray(learningGoals.eyfs_focus) && learningGoals.eyfs_focus.join(" + ")) ||
       (typeof learningGoals.subject_lens === "string"
@@ -897,6 +884,8 @@ function TabGrowth({ childId }) {
 function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [building, setBuilding] = useState(false);
+  const [curriculumSegment, setCurriculumSegment] = useState("progress");
+  const [boardThemeId, setBoardThemeId] = useState(null);
   const [step, setStep] = useState(0);
   const [goals, setGoals] = useState([]);
   const [interests, setInterests] = useState([]);
@@ -907,13 +896,12 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
   const goalOptions     = ["Communication","Maths & Logic","Creative Arts","Social & Emotional","Nature & Science"];
   const interestOptions = ["Dinosaurs","Space","Ocean","Animals","Superheroes","Cooking"];
   const { data: themes = [], isFetching: isLoadingThemes } = useGetThemesThemesGetQuery();
-  const selectedThemeId = themes[0]?.id;
   const {
     data: curriculumBoard,
     isFetching: isLoadingBoard,
     isError: isBoardError,
   } = useGetChildCurriculumBoardChildrenChildIdCurriculumBoardGetQuery(
-    childId && selectedThemeId ? { childId, themeId: selectedThemeId } : skipToken,
+    childId ? { childId, themeId: boardThemeId ?? undefined } : skipToken,
   );
   const [createTheme, { isLoading: isCreatingTheme }] = useCreateThemeThemesPostMutation();
   const [createLesson, { isLoading: isCreatingLesson }] = useCreateLessonLessonsPostMutation();
@@ -924,7 +912,11 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
       .sort((a, b) => (a.day_number || 0) - (b.day_number || 0))
       .map(mapCurriculumBoardLessonToDay);
   }, [curriculumBoard]);
-  const themeTitle = curriculumBoard?.theme_title || themes[0]?.title || "This Week";
+  const themeTitle =
+    curriculumBoard?.theme_title ||
+    (boardThemeId ? themes.find((t) => t.id === boardThemeId)?.title : null) ||
+    themes[0]?.title ||
+    "This Week";
   const completedCount = weeklyPlan.filter((d) => d.status === "completed").length;
   const avgEngagement = weeklyPlan.length
     ? Math.round(weeklyPlan.reduce((s, d) => s + (d.engagementPercentage || 0), 0) / weeklyPlan.length)
@@ -1080,90 +1072,139 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
 
   return (
     <div style={{ padding:"0 20px 110px" }}>
-      {/* Week header */}
-      <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
-        <SectionLabel>This Week's Theme</SectionLabel>
-        <p style={{ color:B.cream, fontSize:24, fontWeight:700, marginBottom:12, fontFamily:"Georgia, serif" }}>{themeTitle} 🧍</p>
-        <div style={{ display:"flex", gap:20 }}>
-          {[
-            {
-              label:"Progress",
-              value:`${completedCount} / ${weeklyPlan.length || curriculumBoard?.duration_days || 7}`,
-            },
-            { label:"Avg Engagement", value:`${avgEngagement}%` },
-            {
-              label:"Backend",
-              value:
-                isLoadingThemes || isLoadingBoard
-                  ? "Syncing"
-                  : curriculumBoard
-                    ? "Live"
-                    : isBoardError
-                      ? "Unavailable"
-                      : "—",
-            },
-          ].map(s => (
-            <div key={s.label}>
-              <p style={{ color:B.creamMid, fontSize:10, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{s.label}</p>
-              <p style={{ color:B.cream, fontWeight:700, fontSize:14, fontFamily:"Georgia, serif" }}>{s.value}</p>
-            </div>
-          ))}
-        </div>
+      <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+        <button type="button" onClick={()=>setCurriculumSegment("progress")}
+          style={{
+            flex:1, padding:"11px 12px", borderRadius:12,
+            border:`1px solid ${curriculumSegment==="progress"?B.gold:B.creamLow}`,
+            background:curriculumSegment==="progress"?B.goldFade:B.creamFade,
+            color:curriculumSegment==="progress"?B.gold:B.creamMid,
+            fontWeight:700, fontSize:12, cursor:"pointer",
+          }}>
+          My progress
+        </button>
+        <button type="button" onClick={()=>setCurriculumSegment("manage")}
+          style={{
+            flex:1, padding:"11px 12px", borderRadius:12,
+            border:`1px solid ${curriculumSegment==="manage"?B.gold:B.creamLow}`,
+            background:curriculumSegment==="manage"?B.goldFade:B.creamFade,
+            color:curriculumSegment==="manage"?B.gold:B.creamMid,
+            fontWeight:700, fontSize:12, cursor:"pointer",
+          }}>
+          Themes & lessons
+        </button>
       </div>
 
-      {!isLoadingBoard && weeklyPlan.length === 0 && (
-        <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.6, marginBottom:12 }}>
-          No curriculum lessons for this theme yet. Build or sync a plan, or choose another theme when available.
-        </p>
-      )}
+      {curriculumSegment==="manage" ? (
+        <CurriculumManagement />
+      ) : (
+        <>
+          <div style={{ marginBottom:14 }}>
+            <SectionLabel>Curriculum board theme</SectionLabel>
+            <select
+              value={boardThemeId ?? ""}
+              onChange={(e)=>{
+                const v=e.target.value;
+                setBoardThemeId(v===""?null:Number(v));
+              }}
+              style={{
+                width:"100%", padding:"11px 12px", borderRadius:12,
+                background:B.bgDeep, color:B.cream,
+                border:`1px solid ${B.creamLow}`, fontSize:14,
+              }}
+            >
+              <option value="">Default (server)</option>
+              {themes.map((t)=>(
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
+          </div>
 
-      {weeklyPlan.map(day => (
-        <div key={day.lessonId || day.day} onClick={()=>setSelectedDay(day)}
-          style={{
-            background:B.bgDeep,
-            borderRadius:16,
-            padding:18,
-            marginBottom:10,
-            cursor:"pointer",
-            border:day.status==="completed"?`1px solid rgba(201,139,44,0.35)`:`1px solid ${B.creamLow}`,
-            transition:"border 0.2s",
-          }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-            <div style={{ display:"flex", gap:13, alignItems:"center" }}>
-              <div style={{
-                width:42,
-                height:42,
-                borderRadius:13,
-                background:day.status==="completed"?B.goldFade:B.creamFade,
-                display:"flex",
-                alignItems:"center",
-                justifyContent:"center",
-                border:`1px solid ${day.status==="completed"?B.gold:B.creamLow}`,
-              }}>
-                <span style={{ fontSize:16 }}>{day.status==="completed"?"✦":"◌"}</span>
-              </div>
-              <div>
-                <p style={{ color:B.cream, fontWeight:700, fontSize:14, fontFamily:"Georgia, serif" }}>{day.label}</p>
-                <p style={{ color:B.creamMid, fontSize:12, marginTop:1 }}>{day.type}</p>
-              </div>
+          <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
+            <SectionLabel>This Week's Theme</SectionLabel>
+            <p style={{ color:B.cream, fontSize:24, fontWeight:700, marginBottom:12, fontFamily:"Georgia, serif" }}>{themeTitle} 🧍</p>
+            <div style={{ display:"flex", gap:20 }}>
+              {[
+                {
+                  label:"Progress",
+                  value:`${completedCount} / ${weeklyPlan.length || curriculumBoard?.duration_days || 7}`,
+                },
+                { label:"Avg Engagement", value:`${avgEngagement}%` },
+                {
+                  label:"Backend",
+                  value:
+                    isLoadingThemes || isLoadingBoard
+                      ? "Syncing"
+                      : curriculumBoard
+                        ? "Live"
+                        : isBoardError
+                          ? "Unavailable"
+                          : "—",
+                },
+              ].map(s => (
+                <div key={s.label}>
+                  <p style={{ color:B.creamMid, fontSize:10, textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:3 }}>{s.label}</p>
+                  <p style={{ color:B.cream, fontWeight:700, fontSize:14, fontFamily:"Georgia, serif" }}>{s.value}</p>
+                </div>
+              ))}
             </div>
-            <Badge status={day.status} />
           </div>
-          <div style={{ display:"flex", gap:16, marginBottom:10 }}>
-            <p style={{ color:B.creamMid, fontSize:11 }}>🎯 {day.focus}</p>
-            <p style={{ color:B.creamMid, fontSize:11 }}>⏱ {day.time}</p>
-          </div>
-          <ProgressBar value={day.engagementPercentage} color={B.gold} height={4} />
-          <p style={{ color:B.gold, fontSize:11, marginTop:5 }}>Engagement {day.engagementPercentage}%</p>
-        </div>
-      ))}
 
-      <button onClick={()=>setBuilding(true)}
-        style={{ width:"100%", padding:16, borderRadius:16, background:B.gold, color:B.dark, fontWeight:700, fontSize:15, border:"none", cursor:"pointer", marginTop:8, fontFamily:"Georgia, serif", letterSpacing:"0.02em" }}>
-        ✦ Build a New Personalised Plan
-      </button>
+          {!isLoadingBoard && weeklyPlan.length === 0 && (
+            <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.6, marginBottom:12 }}>
+              No curriculum lessons for this theme yet. Build or sync a plan, or choose another theme when available.
+            </p>
+          )}
 
-      {selectedDay && <DaySheet day={selectedDay} childId={childId} onClose={()=>setSelectedDay(null)} />}
+          {weeklyPlan.map(day => (
+            <div key={day.lessonId || day.day} onClick={()=>setSelectedDay(day)}
+              style={{
+                background:B.bgDeep,
+                borderRadius:16,
+                padding:18,
+                marginBottom:10,
+                cursor:"pointer",
+                border:day.status==="completed"?`1px solid rgba(201,139,44,0.35)`:`1px solid ${B.creamLow}`,
+                transition:"border 0.2s",
+              }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+                <div style={{ display:"flex", gap:13, alignItems:"center" }}>
+                  <div style={{
+                    width:42,
+                    height:42,
+                    borderRadius:13,
+                    background:day.status==="completed"?B.goldFade:B.creamFade,
+                    display:"flex",
+                    alignItems:"center",
+                    justifyContent:"center",
+                    border:`1px solid ${day.status==="completed"?B.gold:B.creamLow}`,
+                  }}>
+                    <span style={{ fontSize:16 }}>{day.status==="completed"?"✦":"◌"}</span>
+                  </div>
+                  <div>
+                    <p style={{ color:B.cream, fontWeight:700, fontSize:14, fontFamily:"Georgia, serif" }}>{day.label}</p>
+                    <p style={{ color:B.creamMid, fontSize:12, marginTop:1 }}>{day.type}</p>
+                  </div>
+                </div>
+                <Badge status={day.status} />
+              </div>
+              <div style={{ display:"flex", gap:16, marginBottom:10 }}>
+                <p style={{ color:B.creamMid, fontSize:11 }}>🎯 {day.focus}</p>
+                <p style={{ color:B.creamMid, fontSize:11 }}>⏱ {day.time}</p>
+              </div>
+              <ProgressBar value={day.engagementPercentage} color={B.gold} height={4} />
+              <p style={{ color:B.gold, fontSize:11, marginTop:5 }}>Engagement {day.engagementPercentage}%</p>
+            </div>
+          ))}
+
+          <button onClick={()=>setBuilding(true)}
+            style={{ width:"100%", padding:16, borderRadius:16, background:B.gold, color:B.dark, fontWeight:700, fontSize:15, border:"none", cursor:"pointer", marginTop:8, fontFamily:"Georgia, serif", letterSpacing:"0.02em" }}>
+            ✦ Build a New Personalised Plan
+          </button>
+
+          {selectedDay && <DaySheet day={selectedDay} childId={childId} onClose={()=>setSelectedDay(null)} />}
+        </>
+      )}
     </div>
   );
 }

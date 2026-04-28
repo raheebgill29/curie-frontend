@@ -48,7 +48,9 @@ const injectedRtkApi = api
       >({
         query: (queryArg) => ({
           url: `/children/${queryArg.childId}/curriculum-board`,
-          params: { theme_id: queryArg.themeId },
+          ...(queryArg.themeId != null && queryArg.themeId !== undefined
+            ? { params: { theme_id: queryArg.themeId } }
+            : {}),
         }),
         providesTags: ["children"],
       }),
@@ -133,7 +135,8 @@ export type CurriculumBoardResponse = {
 };
 export type GetChildCurriculumBoardChildrenChildIdCurriculumBoardGetApiArg = {
   childId: number;
-  themeId: number;
+  /** Omit or leave undefined for server default theme */
+  themeId?: number | null;
 };
 export const {
   useCreateChildChildrenPostMutation,
