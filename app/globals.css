@@ -22,3 +22,19 @@ p,
 h1 {
   margin-top: 0;
 }
+
+@keyframes curie-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.curie-loading-spinner {
+  display: inline-block;
+  border-radius: 50%;
+  border: 3px solid rgba(247, 242, 235, 0.22);
+  border-top-color: #c98b2c;
+  animation: curie-spin 0.82s linear infinite;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}

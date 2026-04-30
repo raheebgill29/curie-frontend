@@ -32,6 +32,9 @@ import {
 } from "./src/lib/api/generated/toyApi";
 import { B } from "./src/lib/brandPalette.js";
 import CurriculumManagement from "./src/components/CurriculumManagement.jsx";
+import Loading, { LoadingSpinner } from "./src/components/Loading.tsx";
+import { store } from "./src/lib/store";
+import { baseApi } from "./src/lib/api/baseApi";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 const EYFS_DOMAINS = [
@@ -52,6 +55,17 @@ const AI_INSIGHTS = [
 
 const DEMO_CHILD_ID = Number(process.env.NEXT_PUBLIC_DEMO_CHILD_ID || 1) || 1;
 const SESSION_KEY = "curiouser-session";
+
+/** Clear saved session, drop RTK Query cache, and return to onboarding (no backend call required for current auth model). */
+function signOutAndClearSession(onSessionChange) {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+  store.dispatch(baseApi.util.resetApiState());
+  onSessionChange(null);
+}
 
 const DOMAIN_SCORE_KEYS = {
   physical: ["physical", "physical_development", "physical development", "pd"],
@@ -564,7 +578,7 @@ function DaySheet({ day, childId, onClose }) {
   const [generateSession, { data: generatedSession, isLoading: isGenerating, isError: didGenerateFail }] = useGenerateSessionToyGenerateSessionPostMutation();
   const [respond, { isLoading: isResponding, isError: didRespondFail }] = useRespondToyRespondPostMutation();
   const [evaluate, { data: evaluation, isLoading: isEvaluating, isError: didEvaluateFail }] = useEvaluateToyEvaluatePostMutation();
-  const { data: preview } = usePreviewLessonLessonsLessonIdPreviewGetQuery(day.lessonId ? { lessonId: day.lessonId } : skipToken);
+  const { data: preview, isFetching: isPreviewLoading } = usePreviewLessonLessonsLessonIdPreviewGetQuery(day.lessonId ? { lessonId: day.lessonId } : skipToken);
   const startSession = () => {
     if (!day.lessonId) return;
     setTurns([]);
@@ -647,15 +661,27 @@ function DaySheet({ day, childId, onClose }) {
 
         {day.lessonId && (
           <div style={{ margin:"18px 0", background:B.creamFade, borderRadius:14, padding:14, border:`1px solid ${B.creamLow}` }}>
-            {preview && (
+            {isPreviewLoading ? (
+              <div style={{ marginBottom:14 }}>
+                <Loading variant="inline" size="sm" message="Loading lesson preview…" />
+              </div>
+            ) : null}
+            {preview && !isPreviewLoading && (
               <div style={{ marginBottom:14, paddingBottom:14, borderBottom:`1px solid ${B.creamLow}` }}>
                 <SectionLabel>AI Prompt Preview</SectionLabel>
                 <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.55 }}>{preview.rendered_system_prompt.slice(0, 220)}{preview.rendered_system_prompt.length > 220 ? "..." : ""}</p>
               </div>
             )}
             <button onClick={startSession}
-              style={{ width:"100%", padding:12, borderRadius:11, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isGenerating?"default":"pointer", fontFamily:"Georgia, serif" }}>
-              {isGenerating ? "Starting Curious Buddy..." : "Start AI Toy Session"}
+              style={{ width:"100%", padding:12, borderRadius:11, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isGenerating?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+              {isGenerating ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  <span>Starting Curious Buddy…</span>
+                </>
+              ) : (
+                "Start AI Toy Session"
+              )}
             </button>
             {generatedSession && (
               <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.55, marginTop:12 }}>
@@ -676,14 +702,28 @@ function DaySheet({ day, childId, onClose }) {
                   <input value={childInput} onChange={e=>setChildInput(e.target.value)} placeholder="Child says..."
                     style={{ flex:1, minWidth:0, padding:"11px 12px", borderRadius:10, background:B.bgDeep, color:B.cream, border:`1px solid ${B.creamLow}` }} />
                   <button onClick={sendChildInput}
-                    style={{ padding:"0 14px", borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isResponding?"default":"pointer" }}>
-                    {isResponding ? "..." : "Send"}
+                    style={{ padding:"0 14px", borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isResponding?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, minWidth:72 }}>
+                    {isResponding ? (
+                      <>
+                        <LoadingSpinner size="sm" />
+                        <span>…</span>
+                      </>
+                    ) : (
+                      "Send"
+                    )}
                   </button>
                 </div>
                 {didRespondFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Toy response failed.</p>}
                 <button onClick={evaluateSession}
-                  style={{ width:"100%", marginTop:10, padding:11, borderRadius:10, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, cursor:isEvaluating?"default":"pointer" }}>
-                  {isEvaluating ? "Evaluating..." : "End & Evaluate Session"}
+                  style={{ width:"100%", marginTop:10, padding:11, borderRadius:10, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, cursor:isEvaluating?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+                  {isEvaluating ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      <span>Evaluating…</span>
+                    </>
+                  ) : (
+                    "End & Evaluate Session"
+                  )}
                 </button>
                 {evaluation && (
                   <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.55, marginTop:10 }}>
@@ -742,8 +782,8 @@ function TabDashboard({ childId, onNudge }) {
   const [mode, setMode] = useState("Learning");
   const [vol, setVol] = useState(70);
   const { data: health, isFetching: isHealthFetching } = useHealthCheckHealthGetQuery();
-  const { data: sessions } = useGetChildSessionsSessionsChildIdGetQuery({ childId, page: 1, pageSize: 5 });
-  const { data: insightsData } = useGetChildInsightsChildrenChildIdInsightsGetQuery({ childId });
+  const { data: sessions, isFetching: isSessionsFetching } = useGetChildSessionsSessionsChildIdGetQuery({ childId, page: 1, pageSize: 5 });
+  const { data: insightsData, isFetching: isInsightsFetching } = useGetChildInsightsChildrenChildIdInsightsGetQuery({ childId });
   const modes = ["Learning","Sleep","Free Chat"];
   const aiInsights = mapInsights(insightsData);
   const onlineLabel = health?.status ? "Curious Buddy Online" : isHealthFetching ? "Checking Buddy Status" : "Curious Buddy Offline";
@@ -759,6 +799,7 @@ function TabDashboard({ childId, onNudge }) {
           <div>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
               <div style={{ width:8, height:8, borderRadius:"50%", background:health?.status ? B.gold : B.terra, boxShadow:`0 0 10px ${health?.status ? B.gold : B.terra}` }} />
+              {isHealthFetching ? <LoadingSpinner size="sm" /> : null}
               <span style={{ color:health?.status ? B.gold : B.terra, fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase" }}>{onlineLabel}</span>
             </div>
             <p style={{ color:B.cream, fontWeight:700, fontSize:15, fontFamily:"Georgia, serif", lineHeight:1.4 }}>Body Awareness · Songs & Movement</p>
@@ -783,6 +824,11 @@ function TabDashboard({ childId, onNudge }) {
       )}
 
       {/* Stats */}
+      {isSessionsFetching ? (
+        <div style={{ marginBottom:14 }}>
+          <Loading variant="inline" size="sm" message="Loading sessions…" />
+        </div>
+      ) : null}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
         {[
           { label:"Sessions", value:sessions?.total ?? "—", sub:"Loaded from backend", color:B.gold },
@@ -799,12 +845,18 @@ function TabDashboard({ childId, onNudge }) {
       {/* AI Insights */}
       <div style={{ background:B.bgDeep, borderRadius:20, padding:20, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>Today's AI Insights</SectionLabel>
-        {aiInsights.map((ins,i) => (
+        {isInsightsFetching ? (
+          <Loading variant="section" size="sm" message="Loading insights…" />
+        ) : null}
+        {!isInsightsFetching && aiInsights.map((ins,i) => (
           <div key={i} style={{ display:"flex", gap:13, marginBottom:i<aiInsights.length-1?16:0, paddingBottom:i<aiInsights.length-1?16:0, borderBottom:i<aiInsights.length-1?`1px solid ${B.creamLow}`:"none" }}>
             <span style={{ fontSize:17, lineHeight:1.5 }}>{ins.icon}</span>
             <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.6 }}>{ins.text}</p>
           </div>
         ))}
+        {!isInsightsFetching && aiInsights.length === 0 ? (
+          <p style={{ color:B.creamMid, fontSize:13 }}>No insights yet.</p>
+        ) : null}
       </div>
 
       {/* Quick controls */}
@@ -831,7 +883,7 @@ function TabDashboard({ childId, onNudge }) {
 function TabGrowth({ childId }) {
   const [selectedDomain, setSelectedDomain] = useState(null);
   const [enhanced, setEnhanced] = useState([]);
-  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId });
+  const { data: child, isFetching: isChildLoading } = useGetChildChildrenChildIdGetQuery({ childId });
   const { data: progressData, isFetching, isError } = useGetChildProgressChildrenChildIdProgressGetQuery({ childId });
   const domains = mapProgressToDomains(progressData);
   const childName = child?.name || "Leo";
@@ -839,8 +891,18 @@ function TabGrowth({ childId }) {
     <div style={{ padding:"0 20px 110px" }}>
       <div style={{ background:B.bgDeep, borderRadius:20, padding:24, marginBottom:14, textAlign:"center", border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>EYFS Development Radar</SectionLabel>
-        <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:4, fontFamily:"Georgia, serif" }}>{childName}'s Growth Profile</p>
-        <p style={{ color:B.creamMid, fontSize:12, marginBottom:22 }}>{isFetching ? "Loading backend progress..." : isError ? "Showing saved demo progress" : "Tap any dimension to view details & boost"}</p>
+        {isChildLoading ? (
+          <div style={{ marginBottom:8 }}>
+            <Loading variant="inline" size="sm" message="Loading child profile…" />
+          </div>
+        ) : (
+          <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:4, fontFamily:"Georgia, serif" }}>{childName}'s Growth Profile</p>
+        )}
+        {isFetching ? (
+          <Loading variant="section" size="sm" message="Loading backend progress…" />
+        ) : (
+          <p style={{ color:B.creamMid, fontSize:12, marginBottom:22 }}>{isError ? "Showing saved demo progress" : "Tap any dimension to view details & boost"}</p>
+        )}
         <div style={{ display:"flex", justifyContent:"center" }}>
           <RadarChart domains={domains} size={220} onSelect={setSelectedDomain} />
         </div>
@@ -1043,7 +1105,16 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
                     · A full 7-day EYFS-structured session plan
                   </p>
                 </div>
-                <button onClick={syncPlan} style={{ width:"100%", padding:15, borderRadius:12, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isSyncingPlan?"default":"pointer", fontFamily:"Georgia, serif" }}>{isSyncingPlan ? "Syncing..." : "Save & Sync to Curious Buddy ✦"}</button>
+                <button onClick={syncPlan} style={{ width:"100%", padding:15, borderRadius:12, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isSyncingPlan?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+                  {isSyncingPlan ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      <span>Syncing…</span>
+                    </>
+                  ) : (
+                    "Save & Sync to Curious Buddy ✦"
+                  )}
+                </button>
                 <button onClick={()=>{ setStep(3); setSyncedPlan(null); }}
                   style={{ width:"100%", marginTop:10, padding:13, borderRadius:12, background:B.creamFade, color:B.cream, fontWeight:700, border:`1px solid ${B.creamLow}`, cursor:"pointer", fontFamily:"Georgia, serif" }}>
                   Use This Plan Without Backend Sync
@@ -1150,7 +1221,11 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
             </div>
           </div>
 
-          {!isLoadingBoard && weeklyPlan.length === 0 && (
+          {isLoadingBoard ? (
+            <Loading variant="section" message="Loading curriculum board…" />
+          ) : (
+            <>
+          {!weeklyPlan.length && (
             <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.6, marginBottom:12 }}>
               No curriculum lessons for this theme yet. Build or sync a plan, or choose another theme when available.
             </p>
@@ -1196,6 +1271,8 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
               <p style={{ color:B.gold, fontSize:11, marginTop:5 }}>Engagement {day.engagementPercentage}%</p>
             </div>
           ))}
+            </>
+          )}
 
           {/* <button onClick={()=>setBuilding(true)}
             style={{ width:"100%", padding:16, borderRadius:16, background:B.gold, color:B.dark, fontWeight:700, fontSize:15, border:"none", cursor:"pointer", marginTop:8, fontFamily:"Georgia, serif", letterSpacing:"0.02em" }}>
@@ -1304,22 +1381,40 @@ function Onboarding({ onReady }) {
             <input value={parentEmail} onChange={e=>setParentEmail(e.target.value)} placeholder="Email" style={inputStyle} />
             <input value={parentPassword} onChange={e=>setParentPassword(e.target.value)} placeholder="Password" type="password" style={inputStyle} />
             <button onClick={handleLoginParent}
-              style={{ width:"100%", padding:13, borderRadius:12, background:B.gold, color:B.dark, border:"none", fontWeight:700, marginBottom:18, cursor:isLoggingIn?"default":"pointer", fontFamily:"Georgia, serif" }}>
-              {isLoggingIn ? "Logging in..." : "Login"}
+              style={{ width:"100%", padding:13, borderRadius:12, background:B.gold, color:B.dark, border:"none", fontWeight:700, marginBottom:18, cursor:isLoggingIn?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+              {isLoggingIn ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  <span>Logging in…</span>
+                </>
+              ) : (
+                "Login"
+              )}
             </button>
 
             <Divider />
             <p style={{ color:B.cream, fontSize:15, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>New parent?</p>
             <button onClick={handleRegisterParent}
-              style={{ width:"100%", padding:13, borderRadius:12, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isRegisteringParent?"default":"pointer", fontFamily:"Georgia, serif" }}>
-              {isRegisteringParent ? "Creating..." : "Create Parent"}
+              style={{ width:"100%", padding:13, borderRadius:12, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isRegisteringParent?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+              {isRegisteringParent ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  <span>Creating…</span>
+                </>
+              ) : (
+                "Create Parent"
+              )}
             </button>
           </>
         ) : (
           <>
             <SectionLabel>Child Profile</SectionLabel>
             <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.5, marginBottom:14 }}>Logged in as {activeParent?.email}. Select a child to continue.</p>
-            {isLoadingChildren && <p style={{ color:B.creamMid, fontSize:12, marginBottom:10 }}>Loading children...</p>}
+            {isLoadingChildren && (
+              <div style={{ marginBottom:12 }}>
+                <Loading variant="inline" size="sm" message="Loading children…" />
+              </div>
+            )}
             {!isLoadingChildren && children.length === 0 && <p style={{ color:B.creamMid, fontSize:12, marginBottom:10 }}>No child profiles yet. Add one below.</p>}
             {children.map(child => (
               <button key={child.id} onClick={()=>continueWithChild(child)}
@@ -1334,8 +1429,15 @@ function Onboarding({ onReady }) {
             <input value={childName} onChange={e=>setChildName(e.target.value)} placeholder="Child name" style={inputStyle} />
             <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={inputStyle} />
             <button onClick={handleCreateChild}
-              style={{ width:"100%", padding:13, borderRadius:12, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif" }}>
-              {isCreatingChild ? "Creating..." : "Create Child & Enter App"}
+              style={{ width:"100%", padding:13, borderRadius:12, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+              {isCreatingChild ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  <span>Creating…</span>
+                </>
+              ) : (
+                "Create Child & Enter App"
+              )}
             </button>
           </>
         )}
@@ -1349,7 +1451,7 @@ function Onboarding({ onReady }) {
 function TabProfile({ childId, parentSession, onSessionChange }) {
   const [childNameInput, setChildNameInput] = useState("");
   const [childDob, setChildDob] = useState("");
-  const { data: child } = useGetChildChildrenChildIdGetQuery({ childId });
+  const { data: child, isFetching: isChildProfileLoading } = useGetChildChildrenChildIdGetQuery({ childId });
   const [createChild, { data: createdChild, isLoading: isCreatingChild, isError: didCreateChildFail }] = useCreateChildChildrenPostMutation();
   const childName = child?.name || "Leo";
   const handleCreateChild = () => {
@@ -1375,19 +1477,29 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
   return (
     <div style={{ padding:"0 20px 110px" }}>
       <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, display:"flex", gap:16, alignItems:"center", border:`1px solid ${B.creamLow}` }}>
-        <div style={{ width:62, height:62, borderRadius:18, background:`linear-gradient(135deg, ${B.gold}, ${B.terra})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, flexShrink:0 }}>
-          👧
-        </div>
-        <div>
-          <p style={{ color:B.cream, fontSize:21, fontWeight:700, fontFamily:"Georgia, serif" }}>{childName}</p>
-          <p style={{ color:B.creamMid, fontSize:13 }}>{getAgeLabel(child?.dob)} · EYFS Growth Profile</p>
-          <p style={{ color:B.gold, fontSize:12, marginTop:3, fontFamily:"Georgia, serif" }}>✦ Child ID {child?.id || childId}</p>
-        </div>
+        {isChildProfileLoading ? (
+          <Loading variant="section" size="sm" message="Loading profile…" />
+        ) : (
+          <>
+            <div style={{ width:62, height:62, borderRadius:18, background:`linear-gradient(135deg, ${B.gold}, ${B.terra})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:28, flexShrink:0 }}>
+              👧
+            </div>
+            <div>
+              <p style={{ color:B.cream, fontSize:21, fontWeight:700, fontFamily:"Georgia, serif" }}>{childName}</p>
+              <p style={{ color:B.creamMid, fontSize:13 }}>{getAgeLabel(child?.dob)} · EYFS Growth Profile</p>
+              <p style={{ color:B.gold, fontSize:12, marginTop:3, fontFamily:"Georgia, serif" }}>✦ Child ID {child?.id || childId}</p>
+            </div>
+          </>
+        )}
       </div>
 
-      <button onClick={()=>{ localStorage.removeItem(SESSION_KEY); onSessionChange(null); }}
-        style={{ width:"100%", padding:13, borderRadius:14, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, marginBottom:18, cursor:"pointer", fontFamily:"Georgia, serif" }}>
-        Switch Parent / Child
+      <button type="button" onClick={() => signOutAndClearSession(onSessionChange)}
+        style={{ width:"100%", padding:13, borderRadius:14, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, marginBottom:10, cursor:"pointer", fontFamily:"Georgia, serif" }}>
+        Switch parent / child
+      </button>
+      <button type="button" onClick={() => signOutAndClearSession(onSessionChange)}
+        style={{ width:"100%", padding:13, borderRadius:14, background:"transparent", color:B.terra, border:`1.5px solid ${B.terra}`, fontWeight:700, marginBottom:18, cursor:"pointer", fontFamily:"Georgia, serif" }}>
+        Log out
       </button>
 
       <SectionLabel>Account Setup</SectionLabel>
@@ -1397,8 +1509,15 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         <input value={childNameInput} onChange={e=>setChildNameInput(e.target.value)} placeholder="Child name" style={inputStyle} />
         <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={inputStyle} />
         <button onClick={handleCreateChild}
-          style={{ width:"100%", padding:12, borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif" }}>
-          {isCreatingChild ? "Adding..." : "Add Child"}
+          style={{ width:"100%", padding:12, borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
+          {isCreatingChild ? (
+            <>
+              <LoadingSpinner size="sm" />
+              <span>Adding…</span>
+            </>
+          ) : (
+            "Add Child"
+          )}
         </button>
         {createdChild && <p style={{ color:B.gold, fontSize:12, marginTop:8 }}>Child created: {createdChild.name} #{createdChild.id}</p>}
         {didCreateChildFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Child creation failed.</p>}

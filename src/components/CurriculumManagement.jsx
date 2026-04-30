@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { B } from "../lib/brandPalette.js";
+import Loading, { LoadingSpinner } from "./Loading.tsx";
 import {
   parseApiError,
   useCreateLessonLessonsPostMutation,
@@ -195,7 +196,7 @@ function PreviewModal({ lessonId, onClose }) {
       >
         <div style={{ width: 40, height: 4, background: B.creamLow, borderRadius: 99, margin: "0 auto 16px" }} />
         <SectionLabel>Lesson preview</SectionLabel>
-        {isFetching && <p style={{ color: B.creamMid, fontSize: 13 }}>Loading preview...</p>}
+        {isFetching ? <Loading variant="inline" size="sm" message="Loading preview…" /> : null}
         {isError && <p style={{ color: B.terra, fontSize: 13 }}>{parseApiError(error)}</p>}
         {data && (
           <>
@@ -339,9 +340,22 @@ function ThemeFormPanel({ mode, initial, onBack, onSaved }) {
           border: "none",
           fontWeight: 700,
           cursor: busy ? "default" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
         }}
       >
-        {busy ? "Saving..." : mode === "create" ? "Create theme" : "Save changes"}
+        {busy ? (
+          <>
+            <LoadingSpinner size="sm" />
+            <span>Saving…</span>
+          </>
+        ) : mode === "create" ? (
+          "Create theme"
+        ) : (
+          "Save changes"
+        )}
       </button>
     </div>
   );
@@ -584,9 +598,22 @@ function LessonFormPanel({ mode, themeId, initialLesson, onBack, onSaved }) {
           border: "none",
           fontWeight: 700,
           cursor: busy ? "default" : "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
         }}
       >
-        {busy ? "Saving..." : mode === "create" ? "Create lesson" : "Save lesson"}
+        {busy ? (
+          <>
+            <LoadingSpinner size="sm" />
+            <span>Saving…</span>
+          </>
+        ) : mode === "create" ? (
+          "Create lesson"
+        ) : (
+          "Save lesson"
+        )}
       </button>
     </div>
   );
@@ -728,7 +755,7 @@ export default function CurriculumManagement() {
             </button>
           </div>
 
-          {loadingLessons && <p style={{ color: B.creamMid, fontSize: 13 }}>Loading lessons...</p>}
+          {loadingLessons ? <Loading variant="inline" size="sm" message="Loading lessons…" /> : null}
           {lessonsQueryErr && (
             <p style={{ color: B.terra, fontSize: 13, marginBottom: 10 }}>
               {parseApiError(lessonsQueryError)} ·{" "}
@@ -844,7 +871,7 @@ export default function CurriculumManagement() {
         Sort week {sortWeekDesc ? "↑ ascending" : "↓ descending"}
       </button>
 
-      {loadingThemes && <p style={{ color: B.creamMid, fontSize: 13 }}>Loading themes...</p>}
+      {loadingThemes ? <Loading variant="inline" size="sm" message="Loading themes…" /> : null}
       {themesErr && <p style={{ color: B.terra, fontSize: 13, marginBottom: 10 }}>{parseApiError(themesError)}</p>}
       {!loadingThemes && !themes.length && (
         <p style={{ color: B.creamMid, fontSize: 14, lineHeight: 1.6 }}>No themes yet. Create your first theme.</p>
