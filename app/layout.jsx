@@ -3,13 +3,13 @@ import PwaRegister from "./PwaRegister";
 import Providers from "./providers";
 
 export const metadata = {
-  title: "Curiouser",
+  title: "Curi",
   description: "Curious Buddy parent dashboard",
   manifest: "/manifest.webmanifest",
-  applicationName: "Curiouser",
+  applicationName: "Curi",
   appleWebApp: {
     capable: true,
-    title: "Curiouser",
+    title: "Curi",
     statusBarStyle: "black-translucent",
   },
   icons: {

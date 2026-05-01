@@ -54,7 +54,7 @@ const AI_INSIGHTS = [
 ];
 
 const DEMO_CHILD_ID = Number(process.env.NEXT_PUBLIC_DEMO_CHILD_ID || 1) || 1;
-const SESSION_KEY = "curiouser-session";
+const SESSION_KEY = "curi-session";
 
 /** Clear saved session, drop RTK Query cache, and return to onboarding (no backend call required for current auth model). */
 function signOutAndClearSession(onSessionChange) {
@@ -1371,7 +1371,7 @@ function Onboarding({ onReady }) {
   return (
     <div style={{ minHeight:"100vh", background:B.bg, fontFamily:"Georgia, 'Times New Roman', serif", maxWidth:430, margin:"0 auto", padding:"54px 22px" }}>
       <p style={{ color:B.creamMid, fontSize:12, letterSpacing:"0.08em", textTransform:"uppercase" }}>Welcome to</p>
-      <h1 style={{ color:B.cream, fontSize:34, margin:"4px 0 8px", fontFamily:"Georgia, serif" }}>Curiouser</h1>
+      <h1 style={{ color:B.cream, fontSize:34, margin:"4px 0 8px", fontFamily:"Georgia, serif" }}>Curi</h1>
       <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.6, marginBottom:28 }}>Login with parent email, then choose which child profile to continue with.</p>
 
       <div style={{ background:B.bgDeep, borderRadius:22, padding:22, border:`1px solid ${B.creamLow}` }}>
@@ -1523,7 +1523,7 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         {didCreateChildFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Child creation failed.</p>}
       </div>
 
-      <SectionLabel>Curiouser Parent Community</SectionLabel>
+      <SectionLabel>Curi Parent Community</SectionLabel>
       {[
         { name:"Emma's Mum", time:"2 hours ago", text:"My little one recognised every single body part today — Curious Buddy is incredible!", likes:24 },
         { name:"Jack's Dad",  time:"Yesterday",  text:"After one month the Communication radar has visibly grown. Completely worth it.", likes:38 },
@@ -1552,7 +1552,7 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
 }
 
 // ── Main App ──────────────────────────────────────────────────────────────────
-export default function CuriouserApp() {
+export default function CuriApp() {
   const [tab, setTab] = useState(0);
   const [showNudge, setShowNudge] = useState(false);
   const [session, setSession] = useState(null);
@@ -1598,7 +1598,7 @@ export default function CuriouserApp() {
           <div>
             <p style={{ color:B.creamMid, fontSize:12, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:2 }}>Good morning</p>
             <h1 style={{ color:B.cream, fontSize:28, fontWeight:700, margin:0, letterSpacing:"-0.02em", fontFamily:"Georgia, serif" }}>
-              Curiouser
+              Curi
             </h1>
           </div>
           <div style={{ width:46, height:46, borderRadius:15, background:`linear-gradient(135deg, ${B.gold}, ${B.terra})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>

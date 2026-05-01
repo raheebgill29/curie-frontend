@@ -1,5 +1,5 @@
-import CuriouserApp from "../CURI APP.jsx";
+import CuriApp from "../CURI APP.jsx";
 
 export default function Home() {
-  return <CuriouserApp />;
+  return <CuriApp />;
 }

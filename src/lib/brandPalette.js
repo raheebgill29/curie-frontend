@@ -1,4 +1,4 @@
-/** Shared Curiouser UI palette — mobile-first panels */
+/** Shared Curi UI palette — mobile-first panels */
 export const B = {
   bg: "#5C707A",
   bgDeep: "#3f4d51",
