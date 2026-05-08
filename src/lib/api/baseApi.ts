@@ -5,7 +5,7 @@ export const baseApi = createApi({
   baseQuery: fetchBaseQuery({
     baseUrl:
       process.env.NEXT_PUBLIC_API_BASE_URL ??
-      'https://ai-toy-fastapi.onrender.com',
+      'https://api.curi-intelligence.com/',
   }),
   tagTypes: ['health', 'toy', 'parents', 'children', 'curriculum', 'sessions', 'auth'],
   endpoints: () => ({}),
