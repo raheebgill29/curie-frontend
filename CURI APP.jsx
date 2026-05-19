@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
@@ -31,8 +31,16 @@ import {
   useRespondToyRespondPostMutation,
 } from "./src/lib/api/generated/toyApi";
 import { B } from "./src/lib/brandPalette.js";
+import {
+  useGetChildInterestsQuery,
+  useGetParentChildrenQuery,
+  useUpdateChildGoalsMutation,
+  useUpdateChildInterestsMutation,
+} from "./src/lib/api/homeApi";
 import CurriculumManagement from "./src/components/CurriculumManagement.jsx";
 import Loading, { LoadingSpinner } from "./src/components/Loading.tsx";
+import HomeScreen from "./src/components/HomeScreen.tsx";
+import CurriculumGenerator from "./src/components/CurriculumGenerator.tsx";
 import { store } from "./src/lib/store";
 import { baseApi } from "./src/lib/api/baseApi";
 
@@ -149,6 +157,45 @@ function mapProgressToDomains(progressData) {
     ...domain,
     score: Math.max(0, Math.min(100, Number(getDomainScore(latestScores, domain)) || domain.score)),
   }));
+}
+
+/** Strict: only returns domains that have a real score in the API payload. */
+function buildLiveDomains(progressData) {
+  const latestScores = getLatestProgressScores(progressData);
+  const normalizedScores = Object.entries(latestScores).reduce((acc, [key, value]) => {
+    acc[normalizeKey(key)] = value;
+    return acc;
+  }, {});
+  return EYFS_DOMAINS.map(domain => {
+    const aliases = (DOMAIN_SCORE_KEYS[domain.key] || [domain.key]).map(normalizeKey);
+    const matchedKey = aliases.find(key => normalizedScores[key] != null);
+    if (!matchedKey) return null;
+    const raw = Number(normalizedScores[matchedKey]);
+    if (!Number.isFinite(raw)) return null;
+    return { ...domain, score: Math.max(0, Math.min(100, raw)) };
+  }).filter(Boolean);
+}
+
+/** Build a real per-domain score history (oldest -> newest) from the progress feed. */
+function buildDomainHistory(progressData, domain, maxPoints = 5) {
+  const progress = Array.isArray(progressData?.progress) ? progressData.progress : [];
+  if (!progress.length) return [];
+  const aliases = (DOMAIN_SCORE_KEYS[domain.key] || [domain.key]).map(normalizeKey);
+  const recent = progress.slice(-maxPoints);
+  const series = recent.map(entry => {
+    const normalized = Object.entries(entry?.scores || {}).reduce((acc, [key, value]) => {
+      acc[normalizeKey(key)] = value;
+      return acc;
+    }, {});
+    const matchedKey = aliases.find(key => normalized[key] != null);
+    if (!matchedKey) return null;
+    const raw = Number(normalized[matchedKey]);
+    return Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : null;
+  });
+  // Trim leading/trailing nulls; if everything is null, return empty.
+  const firstReal = series.findIndex(v => v != null);
+  if (firstReal === -1) return [];
+  return series.slice(firstReal).map(v => (v == null ? 0 : v));
 }
 
 function mapInsights(insightsData) {
@@ -518,10 +565,11 @@ function NudgeModal({ onClose }) {
 }
 
 // ── Domain Sheet ──────────────────────────────────────────────────────────────
-function DomainSheet({ domain, onClose, onEnhance }) {
+function DomainSheet({ domain, history = [], onClose, onEnhance }) {
   const [enhanced, setEnhanced] = useState(false);
-  const history = [45,48,52,50,domain.score];
-  const maxH = Math.max(...history);
+  const hasTrend = history.length >= 2;
+  const maxH = hasTrend ? Math.max(...history, 1) : 1;
+  const trendLabel = `${history.length}-Day Trend`;
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(63,77,81,0.85)", display:"flex", alignItems:"flex-end", zIndex:999, backdropFilter:"blur(6px)" }}>
       <div style={{ width:"100%", background:B.bgDeep, borderRadius:"22px 22px 0 0", padding:"24px 22px 44px", maxHeight:"80vh", overflowY:"auto", border:`1px solid ${B.creamLow}`, borderBottom:"none" }}>
@@ -537,22 +585,18 @@ function DomainSheet({ domain, onClose, onEnhance }) {
           </div>
         </div>
 
-        <div style={{ marginBottom:22 }}>
-          <p style={{ color:B.creamMid, fontSize:11, marginBottom:10, letterSpacing:"0.05em", textTransform:"uppercase" }}>5-Day Trend</p>
-          <div style={{ display:"flex", alignItems:"flex-end", gap:7, height:52 }}>
-            {history.map((v,i) => (
-              <div key={i} style={{ flex:1, background:i===history.length-1 ? domain.color : B.creamFade, borderRadius:"4px 4px 0 0", height:`${(v/maxH)*100}%`, transition:"height 0.8s ease", border:`1px solid ${i===history.length-1 ? "transparent" : B.creamLow}` }} />
-            ))}
+        {hasTrend && (
+          <div style={{ marginBottom:22 }}>
+            <p style={{ color:B.creamMid, fontSize:11, marginBottom:10, letterSpacing:"0.05em", textTransform:"uppercase" }}>{trendLabel}</p>
+            <div style={{ display:"flex", alignItems:"flex-end", gap:7, height:52 }}>
+              {history.map((v,i) => (
+                <div key={i} style={{ flex:1, background:i===history.length-1 ? domain.color : B.creamFade, borderRadius:"4px 4px 0 0", height:`${(v/maxH)*100}%`, transition:"height 0.8s ease", border:`1px solid ${i===history.length-1 ? "transparent" : B.creamLow}` }} />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         <Divider />
-        <SectionLabel>AI Observation Log</SectionLabel>
-        <div style={{ background:B.creamFade, borderRadius:14, padding:16, marginBottom:18, border:`1px solid ${B.creamLow}` }}>
-          <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.65 }}>
-            Over the past 3 days, Leo has shown relatively low active exploration in <strong style={{color:B.cream}}>"{domain.label}"</strong>. Structured booster content is recommended to strengthen this dimension.
-          </p>
-        </div>
 
         {!enhanced ? (
           <button onClick={()=>{ setEnhanced(true); onEnhance(domain); }}
@@ -883,26 +927,64 @@ function TabDashboard({ childId, onNudge }) {
 function TabGrowth({ childId }) {
   const [selectedDomain, setSelectedDomain] = useState(null);
   const [enhanced, setEnhanced] = useState([]);
-  const { data: child, isFetching: isChildLoading } = useGetChildChildrenChildIdGetQuery({ childId });
-  const { data: progressData, isFetching, isError } = useGetChildProgressChildrenChildIdProgressGetQuery({ childId });
-  const domains = mapProgressToDomains(progressData);
-  const childName = child?.name || "Leo";
+  const {
+    data: child,
+    isFetching: isChildLoading,
+    isError: isChildError,
+  } = useGetChildChildrenChildIdGetQuery({ childId });
+  const {
+    data: progressData,
+    isFetching: isProgressLoading,
+    isError: isProgressError,
+  } = useGetChildProgressChildrenChildIdProgressGetQuery({ childId });
+
+  const domains = buildLiveDomains(progressData);
+  const hasGrowthData = domains.length > 0;
+  // First-load (no cached data yet). On subsequent refetches keep the last
+  // known data on screen rather than blanking out.
+  const isInitialLoading =
+    (isChildLoading && !child) || (isProgressLoading && !progressData);
+
+  if (isInitialLoading) {
+    return (
+      <div style={{ padding:"0 20px 110px" }}>
+        <div style={{ background:B.bgDeep, borderRadius:20, padding:28, border:`1px solid ${B.creamLow}` }}>
+          <Loading variant="section" message="Loading growth data…" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasGrowthData) {
+    return (
+      <div style={{ padding:"0 20px 110px" }}>
+        <div style={{ background:B.bgDeep, borderRadius:20, padding:28, textAlign:"center", border:`1px solid ${B.creamLow}` }}>
+          <SectionLabel>EYFS Development Radar</SectionLabel>
+          {child?.name && (
+            <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:8, fontFamily:"Georgia, serif" }}>
+              {child.name}'s Growth Profile
+            </p>
+          )}
+          <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.55, marginTop:6 }}>
+            {isProgressError || isChildError
+              ? "We couldn't load growth data just now. Pull down or check back shortly."
+              : "No growth data yet. Once Curious Buddy completes a few sessions, your child's EYFS scores will appear here."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding:"0 20px 110px" }}>
       <div style={{ background:B.bgDeep, borderRadius:20, padding:24, marginBottom:14, textAlign:"center", border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>EYFS Development Radar</SectionLabel>
-        {isChildLoading ? (
-          <div style={{ marginBottom:8 }}>
-            <Loading variant="inline" size="sm" message="Loading child profile…" />
-          </div>
-        ) : (
-          <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:4, fontFamily:"Georgia, serif" }}>{childName}'s Growth Profile</p>
+        {child?.name && (
+          <p style={{ color:B.cream, fontWeight:700, fontSize:16, marginBottom:4, fontFamily:"Georgia, serif" }}>
+            {child.name}'s Growth Profile
+          </p>
         )}
-        {isFetching ? (
-          <Loading variant="section" size="sm" message="Loading backend progress…" />
-        ) : (
-          <p style={{ color:B.creamMid, fontSize:12, marginBottom:22 }}>{isError ? "Showing saved demo progress" : "Tap any dimension to view details & boost"}</p>
-        )}
+        <p style={{ color:B.creamMid, fontSize:12, marginBottom:22 }}>Tap any dimension to view details & boost</p>
         <div style={{ display:"flex", justifyContent:"center" }}>
           <RadarChart domains={domains} size={220} onSelect={setSelectedDomain} />
         </div>
@@ -936,18 +1018,25 @@ function TabGrowth({ childId }) {
       ))}
 
       {selectedDomain && (
-        <DomainSheet domain={selectedDomain} onClose={()=>setSelectedDomain(null)} onEnhance={d=>setEnhanced(prev=>[...prev,d.key])} />
+        <DomainSheet
+          domain={selectedDomain}
+          history={buildDomainHistory(progressData, selectedDomain)}
+          onClose={()=>setSelectedDomain(null)}
+          onEnhance={d=>setEnhanced(prev=>[...prev,d.key])}
+        />
       )}
     </div>
   );
 }
 
 // ── Tab: Curriculum ───────────────────────────────────────────────────────────
-function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
+function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToProfile }) {
   const [selectedDay, setSelectedDay] = useState(null);
   const [building, setBuilding] = useState(false);
+  const [showGenerator, setShowGenerator] = useState(false);
   const [curriculumSegment, setCurriculumSegment] = useState("progress");
   const [boardThemeId, setBoardThemeId] = useState(null);
+  const { data: childForGenerator } = useGetChildChildrenChildIdGetQuery({ childId });
   const [step, setStep] = useState(0);
   const [goals, setGoals] = useState([]);
   const [interests, setInterests] = useState([]);
@@ -1274,12 +1363,24 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan }) {
             </>
           )}
 
-          {/* <button onClick={()=>setBuilding(true)}
+          <button onClick={()=>setShowGenerator(true)}
             style={{ width:"100%", padding:16, borderRadius:16, background:B.gold, color:B.dark, fontWeight:700, fontSize:15, border:"none", cursor:"pointer", marginTop:8, fontFamily:"Georgia, serif", letterSpacing:"0.02em" }}>
-            ✦ Build a New Personalised Plan
-          </button> */}
+            ✦ Generate a New Curriculum
+          </button>
 
           {selectedDay && <DaySheet day={selectedDay} childId={childId} onClose={()=>setSelectedDay(null)} />}
+          {showGenerator && (
+            <CurriculumGenerator
+              childId={childId}
+              childName={childForGenerator?.name}
+              defaultWeekNumber={
+                curriculumBoard?.week_number ? curriculumBoard.week_number + 1 : undefined
+              }
+              onClose={()=>setShowGenerator(false)}
+              onActivated={()=>setShowGenerator(false)}
+              onGoToProfile={onGoToProfile ? () => { setShowGenerator(false); onGoToProfile(); } : undefined}
+            />
+          )}
         </>
       )}
     </div>
@@ -1447,15 +1548,249 @@ function Onboarding({ onReady }) {
   );
 }
 
+// ── Goals config (EYFS areas) ──────────────────────────────────────────────────
+const EYFS_GOALS_OPTIONS = [
+  { value: "communication_and_language",           label: "Communication & Language", icon: "🗣️" },
+  { value: "personal_social_emotional_development", label: "Personal & Social",        icon: "🤝" },
+  { value: "physical_development",                  label: "Physical Development",      icon: "🏃" },
+  { value: "literacy",                              label: "Literacy",                  icon: "📚" },
+  { value: "mathematics",                           label: "Mathematics",               icon: "🔢" },
+  { value: "understanding_the_world",               label: "Understanding the World",   icon: "🌍" },
+  { value: "expressive_arts_and_design",            label: "Creative Arts & Design",    icon: "🎨" },
+];
+
+// ── Goals & Interests editor ───────────────────────────────────────────────────
+function GoalsInterestsEditor({ childId, parentId, currentGoals }) {
+  // ── Goals ──
+  const [selectedGoals, setSelectedGoals] = useState([]);
+  const [goalsTouched, setGoalsTouched] = useState(false);
+  const [updateGoals, goalsState] = useUpdateChildGoalsMutation();
+  const [goalsSaved, setGoalsSaved] = useState(false);
+
+  // Sync goals from prop whenever it changes (initial load + after RTK refetch post-save),
+  // but only when the user hasn't made unsaved edits.
+  useEffect(() => {
+    if (!goalsTouched && currentGoals) {
+      setSelectedGoals(currentGoals);
+    }
+  }, [currentGoals, goalsTouched]);
+
+  // ── Interests ──
+  const { data: interestsData, isFetching: loadingInterests } = useGetChildInterestsQuery({ childId });
+  const [interests, setInterests] = useState([]);
+  const [interestsTouched, setInterestsTouched] = useState(false);
+  const [interestInput, setInterestInput] = useState("");
+  const [updateInterests, interestsState] = useUpdateChildInterestsMutation();
+  const [interestsSaved, setInterestsSaved] = useState(false);
+
+  // Sync interests from API whenever data arrives (initial load + after RTK refetch post-save),
+  // but only when the user hasn't made unsaved edits.
+  useEffect(() => {
+    if (!interestsTouched && interestsData?.interests) {
+      setInterests(interestsData.interests);
+    }
+  }, [interestsData, interestsTouched]);
+
+  const toggleGoal = (value) => {
+    setGoalsTouched(true);
+    setGoalsSaved(false);
+    setSelectedGoals(prev =>
+      prev.includes(value) ? prev.filter(g => g !== value) : [...prev, value]
+    );
+  };
+
+  const saveGoals = async () => {
+    try {
+      await updateGoals({ childId, parentId, goals: selectedGoals }).unwrap();
+      setGoalsTouched(false); // allow re-sync from fresh RTK data
+      setGoalsSaved(true);
+      setTimeout(() => setGoalsSaved(false), 3000);
+    } catch { /* error shown via goalsState.isError */ }
+  };
+
+  const addInterest = () => {
+    const trimmed = interestInput.trim().toLowerCase();
+    if (!trimmed || interests.includes(trimmed)) { setInterestInput(""); return; }
+    setInterestsTouched(true);
+    setInterestsSaved(false);
+    setInterests(prev => [...prev, trimmed]);
+    setInterestInput("");
+  };
+
+  const removeInterest = (item) => {
+    setInterestsTouched(true);
+    setInterestsSaved(false);
+    setInterests(prev => prev.filter(i => i !== item));
+  };
+
+  const saveInterests = async () => {
+    try {
+      await updateInterests({ childId, interests }).unwrap();
+      setInterestsTouched(false); // allow re-sync from fresh RTK data
+      setInterestsSaved(true);
+      setTimeout(() => setInterestsSaved(false), 3000);
+    } catch { /* error shown via interestsState.isError */ }
+  };
+
+  const profileInputStyle = {
+    flex: 1, padding: "11px 14px", borderRadius: 12, background: B.bgDeep,
+    color: B.cream, border: `1px solid ${B.creamLow}`, fontSize: 14,
+  };
+
+  return (
+    <>
+      {/* ── Goals ── */}
+      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 18, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <span style={{ fontSize: 20 }}>🎯</span>
+          <p style={{ color: B.cream, fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Learning Goals</p>
+        </div>
+        <p style={{ color: B.creamMid, fontSize: 12, lineHeight: 1.5, marginBottom: 16 }}>
+          Select the EYFS areas you want Curi to focus on. This shapes every lesson plan.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+          {EYFS_GOALS_OPTIONS.map(({ value, label, icon }) => {
+            const active = selectedGoals.includes(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => toggleGoal(value)}
+                style={{
+                  padding: "11px 10px", borderRadius: 14, cursor: "pointer", textAlign: "left",
+                  background: active ? B.goldFade : B.creamFade,
+                  border: `1.5px solid ${active ? B.gold : B.creamLow}`,
+                  display: "flex", alignItems: "center", gap: 8,
+                }}
+              >
+                <span style={{ fontSize: 18, flexShrink: 0 }}>{icon}</span>
+                <span style={{ color: active ? B.gold : B.creamMid, fontSize: 12, fontWeight: active ? 700 : 400, lineHeight: 1.3 }}>{label}</span>
+                {active && <span style={{ marginLeft: "auto", color: B.gold, fontSize: 14, flexShrink: 0 }}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {selectedGoals.length === 0 && (
+          <p style={{ color: B.terra, fontSize: 12, marginBottom: 12 }}>Select at least one goal to enable curriculum generation.</p>
+        )}
+        {goalsState.isError && (
+          <p style={{ color: B.terra, fontSize: 12, marginBottom: 10 }}>Failed to save — please try again.</p>
+        )}
+
+        <button
+          type="button"
+          onClick={saveGoals}
+          disabled={goalsState.isLoading || selectedGoals.length === 0}
+          style={{
+            width: "100%", padding: 13, borderRadius: 12, fontWeight: 700, fontSize: 14, border: "none",
+            cursor: goalsState.isLoading || selectedGoals.length === 0 ? "default" : "pointer",
+            background: goalsSaved ? B.goldFade : selectedGoals.length === 0 ? B.creamFade : B.gold,
+            color: goalsSaved ? B.gold : selectedGoals.length === 0 ? B.creamMid : B.dark,
+            border: goalsSaved ? `1px solid ${B.gold}` : "none",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}
+        >
+          {goalsState.isLoading ? <><LoadingSpinner size="sm" /><span>Saving…</span></> : goalsSaved ? "✓ Goals saved!" : "Save Goals"}
+        </button>
+      </div>
+
+      {/* ── Interests ── */}
+      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 18, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <span style={{ fontSize: 20 }}>✨</span>
+          <p style={{ color: B.cream, fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Interests</p>
+        </div>
+        <p style={{ color: B.creamMid, fontSize: 12, lineHeight: 1.5, marginBottom: 16 }}>
+          What does your child love? Curi uses these to pick themes and stories that feel personal.
+        </p>
+
+        {loadingInterests ? (
+          <Loading variant="inline" size="sm" message="Loading interests…" />
+        ) : (
+          <>
+            {/* Interest chips */}
+            {interests.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+                {interests.map(item => (
+                  <div
+                    key={item}
+                    style={{ display: "flex", alignItems: "center", gap: 6, background: B.goldFade, border: `1px solid ${B.creamLow}`, borderRadius: 99, padding: "6px 12px" }}
+                  >
+                    <span style={{ color: B.cream, fontSize: 13, fontWeight: 500 }}>{item}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeInterest(item)}
+                      style={{ background: "none", border: "none", color: B.creamMid, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {interests.length === 0 && (
+              <p style={{ color: B.creamMid, fontSize: 13, marginBottom: 14 }}>No interests added yet.</p>
+            )}
+
+            {/* Add input */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <input
+                value={interestInput}
+                onChange={e => setInterestInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && addInterest()}
+                placeholder="e.g. dinosaurs, space, painting…"
+                style={profileInputStyle}
+              />
+              <button
+                type="button"
+                onClick={addInterest}
+                style={{ padding: "11px 16px", borderRadius: 12, background: B.gold, color: B.dark, border: "none", fontWeight: 700, fontSize: 18, cursor: "pointer", flexShrink: 0 }}
+              >
+                +
+              </button>
+            </div>
+
+            {interestsState.isError && (
+              <p style={{ color: B.terra, fontSize: 12, marginBottom: 10 }}>Failed to save — please try again.</p>
+            )}
+
+            <button
+              type="button"
+              onClick={saveInterests}
+              disabled={interestsState.isLoading || interests.length === 0}
+              style={{
+                width: "100%", padding: 13, borderRadius: 12, fontWeight: 700, fontSize: 14, border: "none",
+                cursor: interestsState.isLoading || interests.length === 0 ? "default" : "pointer",
+                background: interestsSaved ? B.goldFade : interests.length === 0 ? B.creamFade : B.gold,
+                color: interestsSaved ? B.gold : interests.length === 0 ? B.creamMid : B.dark,
+                border: interestsSaved ? `1px solid ${B.gold}` : "none",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}
+            >
+              {interestsState.isLoading ? <><LoadingSpinner size="sm" /><span>Saving…</span></> : interestsSaved ? "✓ Interests saved!" : "Save Interests"}
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
 function TabProfile({ childId, parentSession, onSessionChange }) {
   const [childNameInput, setChildNameInput] = useState("");
   const [childDob, setChildDob] = useState("");
   const { data: child, isFetching: isChildProfileLoading } = useGetChildChildrenChildIdGetQuery({ childId });
+  const parentId = Number(parentSession?.parentId);
+  const { data: parentChildren = [] } = useGetParentChildrenQuery({ parentId }, { skip: !parentId });
+  const currentChild = parentChildren.find(c => c.id === childId);
+  const currentGoals = currentChild?.goals || [];
+
   const [createChild, { data: createdChild, isLoading: isCreatingChild, isError: didCreateChildFail }] = useCreateChildChildrenPostMutation();
   const childName = child?.name || "Leo";
   const handleCreateChild = () => {
-    const parentId = Number(parentSession?.parentId);
     if (!childNameInput || !parentId) return;
     createChild({
       childCreateSchema: {
@@ -1465,7 +1800,7 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
       },
     });
   };
-  const inputStyle = {
+  const profileInputStyle = {
     width:"100%",
     padding:"11px 12px",
     borderRadius:10,
@@ -1476,6 +1811,7 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
   };
   return (
     <div style={{ padding:"0 20px 110px" }}>
+      {/* Child header */}
       <div style={{ background:B.bgDeep, borderRadius:20, padding:22, marginBottom:14, display:"flex", gap:16, alignItems:"center", border:`1px solid ${B.creamLow}` }}>
         {isChildProfileLoading ? (
           <Loading variant="section" size="sm" message="Loading profile…" />
@@ -1498,16 +1834,21 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         Switch parent / child
       </button>
       <button type="button" onClick={() => signOutAndClearSession(onSessionChange)}
-        style={{ width:"100%", padding:13, borderRadius:14, background:"transparent", color:B.terra, border:`1.5px solid ${B.terra}`, fontWeight:700, marginBottom:18, cursor:"pointer", fontFamily:"Georgia, serif" }}>
+        style={{ width:"100%", padding:13, borderRadius:14, background:"transparent", color:B.terra, border:`1.5px solid ${B.terra}`, fontWeight:700, marginBottom:22, cursor:"pointer", fontFamily:"Georgia, serif" }}>
         Log out
       </button>
 
+      {/* ── Goals & Interests ── */}
+      <SectionLabel>Goals &amp; Interests</SectionLabel>
+      <GoalsInterestsEditor childId={childId} parentId={parentId} currentGoals={currentGoals} />
+
+      {/* ── Account Setup ── */}
       <SectionLabel>Account Setup</SectionLabel>
       <div style={{ background:B.bgDeep, borderRadius:16, padding:18, marginBottom:18, border:`1px solid ${B.creamLow}` }}>
         <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Add Child</p>
         <p style={{ color:B.creamMid, fontSize:12, lineHeight:1.5, marginBottom:12 }}>This child will be linked to the logged-in parent automatically.</p>
-        <input value={childNameInput} onChange={e=>setChildNameInput(e.target.value)} placeholder="Child name" style={inputStyle} />
-        <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={inputStyle} />
+        <input value={childNameInput} onChange={e=>setChildNameInput(e.target.value)} placeholder="Child name" style={profileInputStyle} />
+        <input value={childDob} onChange={e=>setChildDob(e.target.value)} type="date" style={profileInputStyle} />
         <button onClick={handleCreateChild}
           style={{ width:"100%", padding:12, borderRadius:10, background:B.terra, color:B.cream, border:"none", fontWeight:700, cursor:isCreatingChild?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
           {isCreatingChild ? (
@@ -1523,6 +1864,7 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         {didCreateChildFail && <p style={{ color:B.terra, fontSize:12, marginTop:8 }}>Child creation failed.</p>}
       </div>
 
+      {/* ── Community ── */}
       <SectionLabel>Curi Parent Community</SectionLabel>
       {[
         { name:"Emma's Mum", time:"2 hours ago", text:"My little one recognised every single body part today — Curious Buddy is incredible!", likes:24 },
@@ -1538,6 +1880,7 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         </div>
       ))}
 
+      {/* ── Settings ── */}
       <div style={{ marginTop:22, marginBottom:14 }}>
         <SectionLabel>Settings</SectionLabel>
       </div>
@@ -1552,21 +1895,57 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
 }
 
 // ── Main App ──────────────────────────────────────────────────────────────────
+function CuriSplash() {
+  // Rendered during SSR + first client paint so we never flash the login UI on
+  // reload while localStorage is being read.
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: B.bg,
+        maxWidth: 430,
+        margin: "0 auto",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontFamily: "Georgia, 'Times New Roman', serif",
+      }}
+    >
+      <div style={{ textAlign: "center" }}>
+        <p
+          style={{
+            color: B.creamMid,
+            fontSize: 11,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            margin: "0 0 10px",
+          }}
+        >
+          Curi
+        </p>
+        <LoadingSpinner size="md" />
+      </div>
+    </div>
+  );
+}
+
 export default function CuriApp() {
   const [tab, setTab] = useState(0);
   const [showNudge, setShowNudge] = useState(false);
   const [session, setSession] = useState(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [personalizedPlan, setPersonalizedPlan] = useState(null);
 
   useEffect(() => {
-    const savedSession = localStorage.getItem(SESSION_KEY);
-    if (savedSession) {
-      try {
+    try {
+      const savedSession = localStorage.getItem(SESSION_KEY);
+      if (savedSession) {
         setSession(JSON.parse(savedSession));
-      } catch {
-        localStorage.removeItem(SESSION_KEY);
       }
+    } catch {
+      try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     }
+    setIsHydrated(true);
   }, []);
 
   const tabs = [
@@ -1576,14 +1955,23 @@ export default function CuriApp() {
     { label:"Profile",    icon:"◉"  },
   ];
 
+  // Stay on the splash until we've checked localStorage on the client. This
+  // prevents a 1-frame flash of the Onboarding screen on every reload.
+  if (!isHydrated) {
+    return <CuriSplash />;
+  }
+
   if (!session?.childId) {
     return <Onboarding onReady={setSession} />;
   }
 
   const childId = Number(session.childId);
+  const parentId = Number(session.parentId);
+  const fallbackParentName = session.parentEmail ? session.parentEmail.split("@")[0] : undefined;
+  const isHomeTab = tab === 0;
 
   return (
-    <div style={{ minHeight:"100vh", background:B.bg, fontFamily:"Georgia, 'Times New Roman', serif", position:"relative", maxWidth:430, margin:"0 auto" }}>
+    <div style={{ minHeight:"100vh", background:isHomeTab ? "#3e4f57" : B.bg, fontFamily:"Georgia, 'Times New Roman', serif", position:"relative", maxWidth:430, margin:"0 auto" }}>
       {/* Status bar */}
       <div style={{ padding:"14px 22px 0", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ color:B.creamMid, fontSize:12, fontFamily:"Georgia, serif" }}>9:41</span>
@@ -1592,28 +1980,36 @@ export default function CuriApp() {
         </div>
       </div>
 
-      {/* Header */}
-      <div style={{ padding:"16px 22px 20px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div>
-            <p style={{ color:B.creamMid, fontSize:12, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:2 }}>Good morning</p>
-            <h1 style={{ color:B.cream, fontSize:28, fontWeight:700, margin:0, letterSpacing:"-0.02em", fontFamily:"Georgia, serif" }}>
-              Curi
-            </h1>
+      {/* Shell header (hidden on Home – HomeScreen renders its own header) */}
+      {!isHomeTab && (
+        <div style={{ padding:"16px 22px 20px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div>
+              <p style={{ color:B.creamMid, fontSize:12, letterSpacing:"0.06em", textTransform:"uppercase", marginBottom:2 }}>Good morning</p>
+              <h1 style={{ color:B.cream, fontSize:28, fontWeight:700, margin:0, letterSpacing:"-0.02em", fontFamily:"Georgia, serif" }}>
+                Curi
+              </h1>
+            </div>
+            <div style={{ width:46, height:46, borderRadius:15, background:`linear-gradient(135deg, ${B.gold}, ${B.terra})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
+              👧
+            </div>
           </div>
-          <div style={{ width:46, height:46, borderRadius:15, background:`linear-gradient(135deg, ${B.gold}, ${B.terra})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>
-            👧
-          </div>
+          {/* Decorative line */}
+          <div style={{ marginTop:16, height:1, background:`linear-gradient(90deg, ${B.gold}, transparent)` }} />
         </div>
-        {/* Decorative line */}
-        <div style={{ marginTop:16, height:1, background:`linear-gradient(90deg, ${B.gold}, transparent)` }} />
-      </div>
+      )}
 
       {/* Content */}
       <div style={{ overflowY:"auto" }}>
-        {tab===0 && <TabDashboard childId={childId} onNudge={()=>setShowNudge(true)} />}
+        {tab===0 && (
+          <HomeScreen
+            parentId={parentId}
+            childId={childId}
+            fallbackParentName={fallbackParentName}
+          />
+        )}
         {tab===1 && <TabGrowth childId={childId} />}
-        {tab===2 && <TabCurriculum childId={childId} personalizedPlan={personalizedPlan} onPersonalizedPlan={setPersonalizedPlan} />}
+        {tab===2 && <TabCurriculum childId={childId} personalizedPlan={personalizedPlan} onPersonalizedPlan={setPersonalizedPlan} onGoToProfile={() => setTab(3)} />}
         {tab===3 && <TabProfile childId={childId} parentSession={session} onSessionChange={setSession} />}
       </div>
 
