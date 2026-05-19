@@ -1972,14 +1972,6 @@ export default function CuriApp() {
 
   return (
     <div style={{ minHeight:"100vh", background:isHomeTab ? "#3e4f57" : B.bg, fontFamily:"Georgia, 'Times New Roman', serif", position:"relative", maxWidth:430, margin:"0 auto" }}>
-      {/* Status bar */}
-      <div style={{ padding:"14px 22px 0", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <span style={{ color:B.creamMid, fontSize:12, fontFamily:"Georgia, serif" }}>9:41</span>
-        <div style={{ display:"flex", gap:6 }}>
-          {["▲▲▲","WiFi","⬛"].map(i=><span key={i} style={{ color:B.creamLow, fontSize:10 }}>{i}</span>)}
-        </div>
-      </div>
-
       {/* Shell header (hidden on Home – HomeScreen renders its own header) */}
       {!isHomeTab && (
         <div style={{ padding:"16px 22px 20px" }}>
