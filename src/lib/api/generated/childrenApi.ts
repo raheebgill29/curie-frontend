@@ -30,6 +30,7 @@ const injectedRtkApi = api
       >({
         query: (queryArg) => ({
           url: `/children/${queryArg.childId}/progress`,
+          ...(queryArg.weekOf ? { params: { week_of: queryArg.weekOf } } : {}),
         }),
         providesTags: ["children"],
       }),
@@ -72,6 +73,8 @@ export type GetChildProgressChildrenChildIdProgressGetApiResponse =
   /** status 200 Successful Response */ ChildProgressResponse;
 export type GetChildProgressChildrenChildIdProgressGetApiArg = {
   childId: number;
+  /** Any date within the desired week (YYYY-MM-DD). Omit for full history. */
+  weekOf?: string;
 };
 export type GetChildInsightsChildrenChildIdInsightsGetApiResponse =
   /** status 200 Successful Response */ ChildInsightsResponse;
@@ -106,6 +109,10 @@ export type EyfsProgressSchema = {
 };
 export type ChildProgressResponse = {
   child_id: number;
+  /** ISO date of Monday when week_of was supplied. */
+  week_start?: string;
+  /** ISO date of Sunday when week_of was supplied. */
+  week_end?: string;
   progress: EyfsProgressSchema[];
 };
 export type InsightSchema = {

@@ -439,17 +439,10 @@ function StatCard({
 
 // ── Insight mapping (restored from TabDashboard) ─────────────────────────────
 const INSIGHT_ICONS = ["💬", "🧠", "🎨"] as const;
-const FALLBACK_INSIGHTS: { icon: string; text: string }[] = [
-  { icon: "💬", text: "Leo's emotional vocabulary has grown — 5 new words introduced today" },
-  { icon: "🧠", text: "Questions about natural phenomena are infrequent — consider nature exploration" },
-  { icon: "🎨", text: "Creative movement expression is above average for his age — keep nurturing it!" },
-];
-
 type InsightsApiShape = { insights?: { date?: string; insight: string }[] };
 
 function mapInsights(insightsData: InsightsApiShape | undefined): { icon: string; text: string }[] {
   const apiInsights = insightsData?.insights ?? [];
-  if (!apiInsights.length) return FALLBACK_INSIGHTS;
   return apiInsights.slice(0, 3).map((item, index) => ({
     icon: INSIGHT_ICONS[index % INSIGHT_ICONS.length],
     text: item.insight,
@@ -801,7 +794,7 @@ export default function HomeScreen({ parentId, childId, fallbackParentName }: Ho
         {/* Restored extras (from previous Home/TabDashboard) */}
         <LatestSessionDetailCard childId={childId} />
         <AiInsightsCard childId={childId} />
-        <QuickControlsCard />
+        {/* <QuickControlsCard /> */}
       </div>
 
       <Toast state={toast} />

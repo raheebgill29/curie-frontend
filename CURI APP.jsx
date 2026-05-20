@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useHealthCheckHealthGetQuery } from "./src/lib/api/generated/healthApi";
 import {
@@ -55,11 +55,6 @@ const EYFS_DOMAINS = [
   { key: "literacy",      label: "Literacy",              short: "LI",  score: 45, color: B.terra },
 ];
 
-const AI_INSIGHTS = [
-  { icon:"💬", text:"Leo's emotional vocabulary has grown — 5 new words introduced today", domain:"CL" },
-  { icon:"🧠", text:"Questions about natural phenomena are infrequent — consider nature exploration", domain:"UW" },
-  { icon:"🎨", text:"Creative movement expression is above average for his age — keep nurturing it!", domain:"CA" },
-];
 
 const DEMO_CHILD_ID = Number(process.env.NEXT_PUBLIC_DEMO_CHILD_ID || 1) || 1;
 const SESSION_KEY = "curi-session";
@@ -200,8 +195,6 @@ function buildDomainHistory(progressData, domain, maxPoints = 5) {
 
 function mapInsights(insightsData) {
   const apiInsights = insightsData?.insights || [];
-  if (!apiInsights.length) return AI_INSIGHTS;
-
   return apiInsights.slice(0, 3).map((item, index) => ({
     icon: INSIGHT_ICONS[index % INSIGHT_ICONS.length],
     text: item.insight,
@@ -903,7 +896,7 @@ function TabDashboard({ childId, onNudge }) {
         ) : null}
       </div>
 
-      {/* Quick controls */}
+      {/* Quick controls — commented out
       <div style={{ background:B.bgDeep, borderRadius:20, padding:20, border:`1px solid ${B.creamLow}` }}>
         <SectionLabel>Quick Controls</SectionLabel>
         <p style={{ color:B.creamMid, fontSize:11, marginBottom:10, textTransform:"uppercase", letterSpacing:"0.06em" }}>Mode</p>
@@ -919,6 +912,7 @@ function TabDashboard({ childId, onNudge }) {
         <input type="range" min={0} max={100} value={vol} onChange={e=>setVol(+e.target.value)}
           style={{ width:"100%", accentColor:B.gold }} />
       </div>
+      */}
     </div>
   );
 }
@@ -1029,6 +1023,175 @@ function TabGrowth({ childId }) {
   );
 }
 
+// ── Week helpers ──────────────────────────────────────────────────────────────
+function getMonday(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function toISODate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function formatWeekRange(monday) {
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const startStr = monday.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const endStr   = sunday.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return `${startStr} – ${endStr}`;
+}
+
+// ── Week navigator ─────────────────────────────────────────────────────────────
+function WeekNavigator({ selectedDate, onChange }) {
+  const pickerRef = useRef(null);
+  const monday        = getMonday(selectedDate);
+  const todayMonday   = getMonday(new Date());
+  const isCurrentWeek = monday.getTime() >= todayMonday.getTime();
+
+  const goBack = () => {
+    const d = new Date(monday);
+    d.setDate(d.getDate() - 7);
+    onChange(d);
+  };
+
+  const goForward = () => {
+    if (isCurrentWeek) return;
+    const d = new Date(monday);
+    d.setDate(d.getDate() + 7);
+    onChange(d);
+  };
+
+  const openPicker = () => {
+    try { pickerRef.current?.showPicker(); } catch { pickerRef.current?.click(); }
+  };
+
+  const navBtn = (onClick, label, disabled) => (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
+        background: disabled ? "transparent" : B.creamFade,
+        border: `1px solid ${disabled ? "transparent" : B.creamLow}`,
+        color: disabled ? B.creamLow : B.cream,
+        fontSize: 20, cursor: disabled ? "default" : "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, background: B.bgDeep, borderRadius: 14, padding: "10px 12px", border: `1px solid ${B.creamLow}` }}>
+      {navBtn(goBack, "‹", false)}
+
+      <button
+        type="button"
+        onClick={openPicker}
+        style={{ flex: 1, background: "none", border: "none", color: B.cream, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Georgia, serif", textAlign: "center", padding: "4px 0" }}
+      >
+        {formatWeekRange(monday)}
+        <span style={{ color: B.gold, fontSize: 10, marginLeft: 6 }}>▾</span>
+      </button>
+
+      {/* Hidden native date picker — triggered programmatically */}
+      <input
+        ref={pickerRef}
+        type="date"
+        value={toISODate(selectedDate)}
+        max={toISODate(new Date())}
+        onChange={(e) => {
+          if (e.target.value) onChange(new Date(e.target.value + "T00:00:00"));
+        }}
+        style={{ position: "absolute", opacity: 0, pointerEvents: "none", width: 0, height: 0 }}
+        tabIndex={-1}
+      />
+
+      {navBtn(goForward, "›", isCurrentWeek)}
+    </div>
+  );
+}
+
+// ── Weekly EYFS progress card ──────────────────────────────────────────────────
+function WeeklyProgressCard({ childId, selectedDate }) {
+  const weekOf = toISODate(selectedDate);
+  const {
+    data: progressData,
+    isFetching,
+    isError,
+  } = useGetChildProgressChildrenChildIdProgressGetQuery(
+    childId ? { childId, weekOf } : skipToken,
+  );
+
+  const domains = useMemo(() => buildLiveDomains(progressData), [progressData]);
+  const hasData  = domains.length > 0 && domains.some(d => d.score > 0);
+
+  if (isFetching) {
+    return (
+      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 20, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
+        <Loading variant="inline" size="sm" message="Loading progress…" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 20, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
+        <p style={{ color: B.terra, fontSize: 13 }}>Could not load progress data.</p>
+      </div>
+    );
+  }
+
+  if (!hasData) {
+    return (
+      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 24, marginBottom: 14, border: `1px solid ${B.creamLow}`, textAlign: "center" }}>
+        <p style={{ fontSize: 32, marginBottom: 10 }}>📭</p>
+        <p style={{ color: B.cream, fontWeight: 600, fontSize: 15, marginBottom: 6 }}>No sessions in selected week</p>
+        <p style={{ color: B.creamMid, fontSize: 13, lineHeight: 1.5 }}>
+          Complete a session with Curious Buddy and progress will appear here.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: B.bgDeep, borderRadius: 18, padding: 18, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
+      <SectionLabel>EYFS Progress This Week</SectionLabel>
+      {progressData?.week_start && progressData?.week_end && (
+        <p style={{ color: B.creamMid, fontSize: 11, marginBottom: 14 }}>
+          {new Date(progressData.week_start + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+          {" – "}
+          {new Date(progressData.week_end + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+          {" · "}
+          {progressData.progress.length} session{progressData.progress.length !== 1 ? "s" : ""}
+        </p>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {domains.map((domain) => (
+          <div key={domain.key}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: domain.color, flexShrink: 0 }} />
+                <span style={{ color: B.cream, fontSize: 13 }}>{domain.label}</span>
+              </div>
+              <span style={{ color: domain.color, fontSize: 13, fontWeight: 700 }}>{domain.score}%</span>
+            </div>
+            <ProgressBar value={domain.score} color={domain.color} height={6} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Tab: Curriculum ───────────────────────────────────────────────────────────
 function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToProfile }) {
   const [selectedDay, setSelectedDay] = useState(null);
@@ -1036,6 +1199,7 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToPr
   const [showGenerator, setShowGenerator] = useState(false);
   const [curriculumSegment, setCurriculumSegment] = useState("progress");
   const [boardThemeId, setBoardThemeId] = useState(null);
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
   const { data: childForGenerator } = useGetChildChildrenChildIdGetQuery({ childId });
   const [step, setStep] = useState(0);
   const [goals, setGoals] = useState([]);
@@ -1259,6 +1423,10 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToPr
         <CurriculumManagement />
       ) : (
         <>
+          {/* Week navigator + EYFS progress for selected week */}
+          <WeekNavigator selectedDate={selectedDate} onChange={setSelectedDate} />
+          <WeeklyProgressCard childId={childId} selectedDate={selectedDate} />
+
           <div style={{ marginBottom:14 }}>
             <SectionLabel>Curriculum board theme</SectionLabel>
             <select
@@ -1548,6 +1716,71 @@ function Onboarding({ onReady }) {
   );
 }
 
+// ── Manage Children row ────────────────────────────────────────────────────────
+function ManageChildrenRow({ childId, parentSession, onSessionChange }) {
+  const [open, setOpen] = useState(false);
+  const parentId = Number(parentSession?.parentId);
+  const { data: children = [], isFetching } = useGetParentChildrenQuery({ parentId }, { skip: !parentId });
+
+  const switchChild = (child) => {
+    const newSession = { ...parentSession, childId: child.id, childName: child.name };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(newSession)); } catch { /* ignore */ }
+    onSessionChange(newSession);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        style={{ width:"100%", background:B.bgDeep, borderRadius: open ? "14px 14px 0 0" : 14, padding:"17px 18px", display:"flex", justifyContent:"space-between", alignItems:"center", border:`1px solid ${B.creamLow}`, cursor:"pointer" }}
+      >
+        <span style={{ color:B.cream, fontSize:14, fontFamily:"Georgia, serif" }}>Manage Children</span>
+        <span style={{ color:B.creamMid, fontSize:16, transition:"transform 0.2s", display:"inline-block", transform: open ? "rotate(90deg)" : "none" }}>›</span>
+      </button>
+
+      {open && (
+        <div style={{ background:B.bgDeep, borderRadius:"0 0 14px 14px", borderTop:`1px solid ${B.creamLow}`, border:`1px solid ${B.creamLow}`, borderTopWidth:0, overflow:"hidden" }}>
+          {isFetching ? (
+            <div style={{ padding:"14px 18px" }}>
+              <LoadingSpinner size="sm" />
+            </div>
+          ) : children.length === 0 ? (
+            <p style={{ color:B.creamMid, fontSize:13, padding:"14px 18px" }}>No children found.</p>
+          ) : (
+            children.map(child => {
+              const isActive = child.id === childId;
+              return (
+                <button
+                  key={child.id}
+                  type="button"
+                  onClick={() => !isActive && switchChild(child)}
+                  style={{ width:"100%", textAlign:"left", background: isActive ? B.goldFade : "transparent", padding:"13px 18px", border:"none", borderTop:`1px solid ${B.creamLow}`, cursor: isActive ? "default" : "pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}
+                >
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={{ width:36, height:36, borderRadius:10, background:`linear-gradient(135deg, ${B.gold}, ${B.terra})`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, flexShrink:0 }}>
+                      👧
+                    </div>
+                    <div>
+                      <p style={{ color: isActive ? B.gold : B.cream, fontWeight: isActive ? 700 : 400, fontSize:14, fontFamily:"Georgia, serif" }}>{child.name}</p>
+                      <p style={{ color:B.creamMid, fontSize:11, marginTop:2 }}>{getAgeLabel(child.dob)}</p>
+                    </div>
+                  </div>
+                  {isActive
+                    ? <span style={{ color:B.gold, fontSize:14, fontWeight:700 }}>✓ Active</span>
+                    : <span style={{ color:B.gold, fontSize:12, fontWeight:600 }}>Switch →</span>
+                  }
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Goals config (EYFS areas) ──────────────────────────────────────────────────
 const EYFS_GOALS_OPTIONS = [
   { value: "communication_and_language",           label: "Communication & Language", icon: "🗣️" },
@@ -1829,10 +2062,10 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         )}
       </div>
 
-      <button type="button" onClick={() => signOutAndClearSession(onSessionChange)}
+      {/* <button type="button" onClick={() => signOutAndClearSession(onSessionChange)}
         style={{ width:"100%", padding:13, borderRadius:14, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, fontWeight:700, marginBottom:10, cursor:"pointer", fontFamily:"Georgia, serif" }}>
         Switch parent / child
-      </button>
+      </button> */}
       <button type="button" onClick={() => signOutAndClearSession(onSessionChange)}
         style={{ width:"100%", padding:13, borderRadius:14, background:"transparent", color:B.terra, border:`1.5px solid ${B.terra}`, fontWeight:700, marginBottom:22, cursor:"pointer", fontFamily:"Georgia, serif" }}>
         Log out
@@ -1884,7 +2117,17 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
       <div style={{ marginTop:22, marginBottom:14 }}>
         <SectionLabel>Settings</SectionLabel>
       </div>
-      {["Manage Children","Device Pairing","Privacy & Data","Contact Support"].map(s => (
+
+      <ManageChildrenRow childId={childId} parentSession={parentSession} onSessionChange={onSessionChange} />
+
+      {/* Device Pairing — commented out
+      <div style={{ background:B.bgDeep, borderRadius:14, padding:"17px 18px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", border:`1px solid ${B.creamLow}` }}>
+        <span style={{ color:B.cream, fontSize:14, fontFamily:"Georgia, serif" }}>Device Pairing</span>
+        <span style={{ color:B.creamMid, fontSize:16 }}>›</span>
+      </div>
+      */}
+
+      {["Privacy & Data","Contact Support"].map(s => (
         <div key={s} style={{ background:B.bgDeep, borderRadius:14, padding:"17px 18px", marginBottom:8, display:"flex", justifyContent:"space-between", alignItems:"center", border:`1px solid ${B.creamLow}` }}>
           <span style={{ color:B.cream, fontSize:14, fontFamily:"Georgia, serif" }}>{s}</span>
           <span style={{ color:B.creamMid, fontSize:16 }}>›</span>
@@ -1932,6 +2175,7 @@ function CuriSplash() {
 export default function CuriApp() {
   const [tab, setTab] = useState(0);
   const [showNudge, setShowNudge] = useState(false);
+  const scrollRef = useRef(null);
   const [session, setSession] = useState(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [personalizedPlan, setPersonalizedPlan] = useState(null);
@@ -1992,7 +2236,7 @@ export default function CuriApp() {
       )}
 
       {/* Content */}
-      <div style={{ overflowY:"auto" }}>
+      <div ref={scrollRef} style={{ overflowY:"auto" }}>
         {tab===0 && (
           <HomeScreen
             parentId={parentId}
@@ -2008,7 +2252,7 @@ export default function CuriApp() {
       {/* Bottom nav */}
       <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:430, background:`${B.bgDeep}F2`, backdropFilter:"blur(20px)", borderTop:`1px solid ${B.creamLow}`, padding:"13px 0 28px", display:"flex" }}>
         {tabs.map((t,i) => (
-          <button key={i} onClick={()=>setTab(i)}
+          <button key={i} onClick={()=>{ setTab(i); scrollRef.current?.scrollTo({ top: 0, behavior: "instant" }); }}
             style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:4, background:"none", border:"none", cursor:"pointer", padding:"3px 0" }}>
             <span style={{ fontSize:18, color:tab===i ? B.gold : B.creamMid, transition:"color 0.2s" }}>{t.icon}</span>
             <span style={{ fontSize:9, color:tab===i ? B.gold : B.creamMid, fontWeight:tab===i?700:400, letterSpacing:"0.06em", textTransform:"uppercase" }}>{t.label}</span>
