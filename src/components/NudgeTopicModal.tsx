@@ -46,23 +46,35 @@ export default function NudgeTopicModal({
   const [selected, setSelected] = useState<NudgeTopicItem | null>(null);
   const [sent, setSent] = useState(false);
   const [sentLabel, setSentLabel] = useState("");
+  const [sentMessage, setSentMessage] = useState("");
   const [error, setError] = useState("");
+  const [offlineMsg, setOfflineMsg] = useState("");
 
   const topics = data?.topics ?? [];
+
+  const isOfflineError = (msg: string) =>
+    msg.toLowerCase().includes("offline");
 
   const handleSend = async () => {
     if (!selected || sending) return;
     setError("");
+    setOfflineMsg("");
     try {
       const res = await sendNudge({
         childId,
         topicId: selected.id,
       }).unwrap();
       if (!res.ok) {
-        setError(res.message || "Could not send nudge right now.");
+        const msg = res.message || "Could not send nudge right now.";
+        if (isOfflineError(msg)) {
+          setOfflineMsg(msg);
+        } else {
+          setError(msg);
+        }
         return;
       }
       setSentLabel(res.topic_label || selected.label);
+      setSentMessage(res.message || "Curious Buddy will steer toward this topic at the next natural moment.");
       setSent(true);
       onSent?.(res.topic_label || selected.label, res.message);
     } catch (e) {
@@ -178,6 +190,54 @@ export default function NudgeTopicModal({
               </div>
             )}
 
+            {offlineMsg ? (
+              <div
+                style={{
+                  background: "rgba(240,160,67,0.13)",
+                  border: `1.5px solid rgba(240,160,67,0.45)`,
+                  borderRadius: 12,
+                  padding: "14px 16px",
+                  marginBottom: 14,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 18, lineHeight: 1 }}>📡</span>
+                  <p
+                    style={{
+                      color: ACCENT_GOLD,
+                      fontSize: 13,
+                      lineHeight: 1.55,
+                      fontFamily: FONT_SANS,
+                      margin: 0,
+                    }}
+                  >
+                    {offlineMsg}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  style={{
+                    alignSelf: "flex-end",
+                    padding: "8px 20px",
+                    borderRadius: 8,
+                    background: "rgba(240,160,67,0.18)",
+                    color: ACCENT_GOLD,
+                    border: `1px solid rgba(240,160,67,0.4)`,
+                    cursor: "pointer",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    fontFamily: FONT_SANS,
+                  }}
+                >
+                  Got it
+                </button>
+              </div>
+            ) : null}
+
             {error ? (
               <p
                 style={{
@@ -191,26 +251,28 @@ export default function NudgeTopicModal({
               </p>
             ) : null}
 
-            <button
-              type="button"
-              disabled={!selected || sending || topics.length === 0}
-              onClick={handleSend}
-              style={{
-                width: "100%",
-                padding: 14,
-                borderRadius: 12,
-                background: selected ? ACCENT_GOLD : "rgba(247,242,235,0.08)",
-                color: selected ? CARD_BG : TEXT_MUTED,
-                fontWeight: 700,
-                fontSize: 15,
-                border: "none",
-                cursor: selected && !sending ? "pointer" : "default",
-                fontFamily: FONT_SERIF,
-                opacity: sending ? 0.7 : 1,
-              }}
-            >
-              {sending ? "Sending…" : "Send Instruction"}
-            </button>
+            {!offlineMsg && (
+              <button
+                type="button"
+                disabled={!selected || sending || topics.length === 0}
+                onClick={handleSend}
+                style={{
+                  width: "100%",
+                  padding: 14,
+                  borderRadius: 12,
+                  background: selected ? ACCENT_GOLD : "rgba(247,242,235,0.08)",
+                  color: selected ? CARD_BG : TEXT_MUTED,
+                  fontWeight: 700,
+                  fontSize: 15,
+                  border: "none",
+                  cursor: selected && !sending ? "pointer" : "default",
+                  fontFamily: FONT_SERIF,
+                  opacity: sending ? 0.7 : 1,
+                }}
+              >
+                {sending ? "Sending…" : "Send Instruction"}
+              </button>
+            )}
           </>
         ) : (
           <div style={{ textAlign: "center", padding: "24px 0" }}>
@@ -234,7 +296,7 @@ export default function NudgeTopicModal({
                 fontFamily: FONT_SANS,
               }}
             >
-              Curious Buddy will transition naturally at the next turn
+              {sentMessage}
             </p>
             <button
               type="button"
