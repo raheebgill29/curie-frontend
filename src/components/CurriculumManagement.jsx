@@ -14,6 +14,7 @@ import {
   useUpdateLessonLessonsLessonIdPutMutation,
   useUpdateThemeThemesThemeIdPutMutation,
 } from "../lib/api/curriculumService";
+import { themeKeyFromTitle } from "../lib/themeKey";
 
 const LESSON_TYPE_OPTIONS = [
   "story_and_discussion",
@@ -240,7 +241,6 @@ function PreviewModal({ lessonId, lessonLabel, onClose }) {
 function ThemeFormPanel({ mode, initial, onBack, onSaved }) {
   const [createTheme, { isLoading: creating }] = useCreateThemeThemesPostMutation();
   const [updateTheme, { isLoading: updating }] = useUpdateThemeThemesThemeIdPutMutation();
-  const [themeKey, setThemeKey] = useState(initial?.theme_key || "");
   const [title, setTitle] = useState(initial?.title || "");
   const [weekNumber, setWeekNumber] = useState(String(initial?.week_number ?? 1));
   const [durationDays, setDurationDays] = useState(String(initial?.duration_days ?? 7));
@@ -251,9 +251,6 @@ function ThemeFormPanel({ mode, initial, onBack, onSaved }) {
     const e = {};
     const wk = Number(weekNumber);
     const dd = Number(durationDays);
-    if (mode === "create") {
-      if (!/^[a-z0-9_-]{2,80}$/.test(themeKey.trim())) e.theme_key = "Use 2–80 chars: lowercase letters, digits, _ or -.";
-    }
     if (title.trim().length < 3 || title.length > 120) e.title = "Title must be 3–120 characters.";
     if (!Number.isFinite(wk) || wk < 1 || wk > 520) e.week_number = "Week must be 1–520.";
     if (!Number.isFinite(dd) || dd < 1 || dd > 14) e.duration_days = "Duration must be 1–14 days.";
@@ -266,7 +263,15 @@ function ThemeFormPanel({ mode, initial, onBack, onSaved }) {
     if (!validate()) return;
     try {
       if (mode === "create") {
-        await createTheme({ themeCreateSchema: { theme_key: themeKey.trim(), title: title.trim(), week_number: Number(weekNumber), duration_days: Number(durationDays) } }).unwrap();
+        const wk = Number(weekNumber);
+        await createTheme({
+          themeCreateSchema: {
+            theme_key: themeKeyFromTitle(title.trim(), wk),
+            title: title.trim(),
+            week_number: wk,
+            duration_days: Number(durationDays),
+          },
+        }).unwrap();
       } else if (initial?.id) {
         await updateTheme({ themeId: initial.id, themeUpdateSchema: { title: title.trim(), week_number: Number(weekNumber), duration_days: Number(durationDays) } }).unwrap();
       }
@@ -286,14 +291,6 @@ function ThemeFormPanel({ mode, initial, onBack, onSaved }) {
 
       <div style={{ background: B.bgDeep, borderRadius: 18, padding: 20, marginBottom: 24, border: `1px solid ${B.creamLow}` }}>
         <SectionLabel>{mode === "create" ? "New theme" : "Edit theme"}</SectionLabel>
-
-        {mode === "create" && (
-          <>
-            <FieldLabel>Theme key (internal ID)</FieldLabel>
-            <input value={themeKey} onChange={(e) => setThemeKey(e.target.value)} placeholder="e.g. under_the_sea" style={inputStyle(true)} />
-            <FieldError>{fieldErrors.theme_key}</FieldError>
-          </>
-        )}
 
         <FieldLabel required>Theme title</FieldLabel>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Under the Sea" style={inputStyle(true)} />

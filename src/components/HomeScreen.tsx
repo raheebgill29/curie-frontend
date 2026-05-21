@@ -16,6 +16,7 @@ import {
   useGetSessionDetailSessionsSessionIdDetailGetQuery,
 } from "../lib/api/generated/sessionsApi";
 import Loading, { LoadingSpinner } from "./Loading";
+import NudgeTopicModal from "./NudgeTopicModal";
 
 // ── Theme tokens (locked to spec) ────────────────────────────────────────────
 const SCREEN_BG = "#3e4f57"; // slate/teal-grey
@@ -711,6 +712,8 @@ export default function HomeScreen({ parentId, childId, fallbackParentName }: Ho
   } = useHomeData({ parentId, childId });
 
   const { toast, show: showToast } = useToast();
+  const [nudgeOpen, setNudgeOpen] = useState(false);
+  const [nudgeSessionId, setNudgeSessionId] = useState<number | null>(null);
 
   // Inject shimmer keyframes once on mount.
   useEffect(() => {
@@ -727,12 +730,8 @@ export default function HomeScreen({ parentId, childId, fallbackParentName }: Ho
   }, []);
 
   const handleNudgePressed = (sessionId: number) => {
-    // Phase 3 endpoint not built yet — stub with a toast for now.
-    // Persist the sessionId for debugging via console; UI is intentionally light.
-    if (typeof console !== "undefined") {
-      console.info("[Home] Nudge requested for session", sessionId);
-    }
-    showToast("Nudge sent");
+    setNudgeSessionId(sessionId);
+    setNudgeOpen(true);
   };
 
   const showSessionSkeleton = isInitialLoading && !home;
@@ -796,6 +795,18 @@ export default function HomeScreen({ parentId, childId, fallbackParentName }: Ho
         <AiInsightsCard childId={childId} />
         {/* <QuickControlsCard /> */}
       </div>
+
+      {nudgeOpen && nudgeSessionId != null && childId != null ? (
+        <NudgeTopicModal
+          childId={childId}
+          sessionId={nudgeSessionId}
+          onClose={() => {
+            setNudgeOpen(false);
+            setNudgeSessionId(null);
+          }}
+          onSent={(label, message) => showToast(message || `Nudged to ${label}`)}
+        />
+      ) : null}
 
       <Toast state={toast} />
     </div>

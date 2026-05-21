@@ -16,6 +16,7 @@ import {
   useGetThemesThemesGetQuery,
   usePreviewLessonLessonsLessonIdPreviewGetQuery,
 } from "./src/lib/api/generated/curriculumApi";
+import { themeKeyFromTitle } from "./src/lib/themeKey";
 import {
   useGetChildSessionsSessionsChildIdGetQuery,
   useGetSessionDetailSessionsSessionIdDetailGetQuery,
@@ -1252,7 +1253,7 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToPr
     try {
       const theme = await createTheme({
             themeCreateSchema: {
-              theme_key: `${slugify(plan.title)}-${Date.now()}`,
+              theme_key: themeKeyFromTitle(plan.title, 1),
               title: plan.title,
               week_number: 1,
               duration_days: 7,

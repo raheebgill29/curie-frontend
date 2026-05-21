@@ -83,6 +83,18 @@ const injectedRtkApi = api
           { type: "children", id: `interests-${arg.childId}` },
         ],
       }),
+
+      getNudgeTopics: build.query<NudgeTopicsListResponse, void>({
+        query: () => ({ url: "/nudge-topics" }),
+      }),
+
+      sendChildNudge: build.mutation<SendNudgeResponse, SendChildNudgeArg>({
+        query: ({ childId, topicId }) => ({
+          url: `/children/${childId}/nudge`,
+          method: "POST",
+          body: { topic_id: topicId },
+        }),
+      }),
     }),
     overrideExisting: false,
   });
@@ -98,6 +110,17 @@ export type GetActiveSessionArg = { childId: number };
 export type GetChildInterestsArg = { childId: number };
 export type UpdateChildGoalsArg = { childId: number; parentId: number; goals: string[] };
 export type UpdateChildInterestsArg = { childId: number; interests: string[] };
+export type SendChildNudgeArg = { childId: number; topicId: number };
+
+export type NudgeTopicItem = { id: number; label: string };
+export type NudgeTopicsListResponse = { topics: NudgeTopicItem[] };
+export type SendNudgeResponse = {
+  ok: boolean;
+  topic_label: string;
+  session_id: number | null;
+  delivered: boolean;
+  message: string;
+};
 
 // ── Response shapes (from Phase 1 contract) ──────────────────────────────────
 export type ParentResponse = {
@@ -182,4 +205,6 @@ export const {
   useGetChildInterestsQuery,
   useUpdateChildGoalsMutation,
   useUpdateChildInterestsMutation,
+  useGetNudgeTopicsQuery,
+  useSendChildNudgeMutation,
 } = injectedRtkApi;
