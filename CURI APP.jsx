@@ -1782,14 +1782,27 @@ function ManageChildrenRow({ childId, parentSession, onSessionChange }) {
 }
 
 // ── Goals config (EYFS areas) ──────────────────────────────────────────────────
+// Legacy / alternate EYFS slugs → canonical keys (matches backend app/core/eyfs.py).
+const EYFS_GOAL_ALIASES = {
+  personal_social_emotional_development: "personal_social_emotional",
+  expressive_arts_and_design: "creative_arts",
+  expressive_arts: "creative_arts",
+};
+
+function normalizeGoalSlug(goal) {
+  const key = normalizeKey(goal);
+  return EYFS_GOAL_ALIASES[key] || key;
+}
+
+// Slugs must match backend EYFS_AREAS (app/core/constants.py).
 const EYFS_GOALS_OPTIONS = [
-  { value: "communication_and_language",           label: "Communication & Language", icon: "🗣️" },
-  { value: "personal_social_emotional_development", label: "Personal & Social",        icon: "🤝" },
-  { value: "physical_development",                  label: "Physical Development",      icon: "🏃" },
-  { value: "literacy",                              label: "Literacy",                  icon: "📚" },
-  { value: "mathematics",                           label: "Mathematics",               icon: "🔢" },
-  { value: "understanding_the_world",               label: "Understanding the World",   icon: "🌍" },
-  { value: "expressive_arts_and_design",            label: "Creative Arts & Design",    icon: "🎨" },
+  { value: "communication_and_language", label: "Communication & Language", icon: "🗣️" },
+  { value: "personal_social_emotional",    label: "Personal & Social",        icon: "🤝" },
+  { value: "physical_development",         label: "Physical Development",      icon: "🏃" },
+  { value: "literacy",                     label: "Literacy",                  icon: "📚" },
+  { value: "mathematics",                  label: "Mathematics",               icon: "🔢" },
+  { value: "understanding_the_world",      label: "Understanding the World",   icon: "🌍" },
+  { value: "creative_arts",                label: "Creative Arts",             icon: "🎨" },
 ];
 
 // ── Goals & Interests editor ───────────────────────────────────────────────────
@@ -1804,7 +1817,7 @@ function GoalsInterestsEditor({ childId, parentId, currentGoals }) {
   // but only when the user hasn't made unsaved edits.
   useEffect(() => {
     if (!goalsTouched && currentGoals) {
-      setSelectedGoals(currentGoals);
+      setSelectedGoals(currentGoals.map(normalizeGoalSlug));
     }
   }, [currentGoals, goalsTouched]);
 
@@ -1834,7 +1847,11 @@ function GoalsInterestsEditor({ childId, parentId, currentGoals }) {
 
   const saveGoals = async () => {
     try {
-      await updateGoals({ childId, parentId, goals: selectedGoals }).unwrap();
+      await updateGoals({
+        childId,
+        parentId,
+        goals: selectedGoals.map(normalizeGoalSlug),
+      }).unwrap();
       setGoalsTouched(false); // allow re-sync from fresh RTK data
       setGoalsSaved(true);
       setTimeout(() => setGoalsSaved(false), 3000);
