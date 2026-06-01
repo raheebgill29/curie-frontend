@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { B } from "../lib/brandPalette.js";
 import { LoadingSpinner } from "./Loading";
@@ -25,8 +25,14 @@ export type CurriculumGeneratorProps = {
   onClose: () => void;
   /** Called after a successful activation (201). Use to refetch the board. */
   onActivated?: (result: ActivateCurriculumResponse) => void;
-  /** Called when the user taps "Go to Profile" from a missing_goals / missing_interests error. */
+  /** @deprecated Use onEditGoals / onEditInterests from the plan builder instead. */
   onGoToProfile?: () => void;
+  /** Inline mode inside the plan builder (no bottom sheet overlay). */
+  embedded?: boolean;
+  /** Skip the form and generate immediately (requires goals & interests on the child). */
+  autoStart?: boolean;
+  onEditGoals?: () => void;
+  onEditInterests?: () => void;
 };
 
 // ── Local state machine ──────────────────────────────────────────────────────
@@ -59,6 +65,10 @@ export default function CurriculumGenerator({
   onClose,
   onActivated,
   onGoToProfile,
+  embedded = false,
+  autoStart = false,
+  onEditGoals,
+  onEditInterests,
 }: CurriculumGeneratorProps) {
   const [phase, setPhase] = useState<Phase>("form");
   const [durationDays, setDurationDays] = useState<number>(7);
@@ -118,9 +128,16 @@ export default function CurriculumGenerator({
     await runGenerate();
   };
 
-  return (
-    <Sheet onClose={onClose} title="Generate Curriculum" subtitle={childName ? `For ${childName}` : undefined}>
-      {phase === "form" && (
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current) return;
+    autoStarted.current = true;
+    void runGenerate();
+  }, [autoStart]);
+
+  const body = (
+    <>
+      {phase === "form" && !autoStart && (
         <FormPhase
           durationDays={durationDays}
           onDurationChange={setDurationDays}
@@ -131,6 +148,27 @@ export default function CurriculumGenerator({
           blocker={generateBlocker}
           childMissing={generateChildMissing}
           onGoToProfile={onGoToProfile}
+          onEditGoals={onEditGoals}
+          onEditInterests={onEditInterests}
+        />
+      )}
+
+      {autoStart &&
+      phase === "form" &&
+      !generateBlocker &&
+      !generateChildMissing &&
+      (generateState.isLoading || !draftEnvelope) ? (
+        <AutoGeneratePhase childName={childName} />
+      ) : null}
+
+      {phase === "form" && autoStart && (generateBlocker || generateChildMissing) && (
+        <ErrorBlock
+          childMissing={generateChildMissing}
+          blocker={generateBlocker}
+          defaultMessage="Could not generate a curriculum. Please try again."
+          onGoToProfile={onGoToProfile}
+          onEditGoals={onEditGoals}
+          onEditInterests={onEditInterests}
         />
       )}
 
@@ -156,7 +194,34 @@ export default function CurriculumGenerator({
       {phase === "done" && activated && (
         <DonePhase activated={activated} onClose={onClose} />
       )}
+    </>
+  );
+
+  if (embedded) {
+    return <div>{body}</div>;
+  }
+
+  return (
+    <Sheet onClose={onClose} title="Generate Curriculum" subtitle={childName ? `For ${childName}` : undefined}>
+      {body}
     </Sheet>
+  );
+}
+
+function AutoGeneratePhase({ childName }: { childName?: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "36px 0 20px" }}>
+      <div style={{ fontSize: 42, marginBottom: 18, color: B.gold }}>◈</div>
+      <p style={{ color: B.cream, fontSize: 18, fontWeight: 700, fontFamily: "Georgia, serif" }}>
+        Crafting your curriculum…
+      </p>
+      <p style={{ color: B.creamMid, fontSize: 13, marginTop: 8, lineHeight: 1.5 }}>
+        {childName ? `Personalising for ${childName}` : "Built on EYFS framework & Socratic Method"}
+      </p>
+      <div style={{ marginTop: 22, display: "flex", justifyContent: "center" }}>
+        <LoadingSpinner size="md" />
+      </div>
+    </div>
   );
 }
 
@@ -263,6 +328,8 @@ function FormPhase({
   blocker,
   childMissing,
   onGoToProfile,
+  onEditGoals,
+  onEditInterests,
 }: {
   durationDays: number;
   onDurationChange: (v: number) => void;
@@ -273,6 +340,8 @@ function FormPhase({
   blocker: GenerateBlockerInfo | null;
   childMissing: boolean;
   onGoToProfile?: () => void;
+  onEditGoals?: () => void;
+  onEditInterests?: () => void;
 }) {
   return (
     <div>
@@ -311,6 +380,8 @@ function FormPhase({
         blocker={blocker}
         defaultMessage="Could not generate a curriculum. Please try again."
         onGoToProfile={onGoToProfile}
+        onEditGoals={onEditGoals}
+        onEditInterests={onEditInterests}
       />
 
       <button
@@ -638,11 +709,15 @@ function ErrorBlock({
   blocker,
   defaultMessage,
   onGoToProfile,
+  onEditGoals,
+  onEditInterests,
 }: {
   childMissing: boolean;
   blocker: GenerateBlockerInfo | null;
   defaultMessage: string;
   onGoToProfile?: () => void;
+  onEditGoals?: () => void;
+  onEditInterests?: () => void;
 }) {
   if (childMissing) {
     return (
@@ -661,7 +736,13 @@ function ErrorBlock({
           tone="warn"
           title="Learning goals not set"
           body="Curi needs at least one EYFS learning goal before it can draft a plan."
-          action={onGoToProfile ? { label: "Set Goals in Profile →", onPress: onGoToProfile } : undefined}
+          action={
+            onEditGoals
+              ? { label: "← Back to Goals", onPress: onEditGoals }
+              : onGoToProfile
+                ? { label: "Set Goals in Profile →", onPress: onGoToProfile }
+                : undefined
+          }
         />
       );
     case "missing_interests":
@@ -670,7 +751,13 @@ function ErrorBlock({
           tone="warn"
           title="Interests not set"
           body="Curi needs your child's interests (e.g. dinosaurs, space) to personalise the theme."
-          action={onGoToProfile ? { label: "Add Interests in Profile →", onPress: onGoToProfile } : undefined}
+          action={
+            onEditInterests
+              ? { label: "← Back to Interests", onPress: onEditInterests }
+              : onGoToProfile
+                ? { label: "Add Interests in Profile →", onPress: onGoToProfile }
+                : undefined
+          }
         />
       );
     case "validation_failed":

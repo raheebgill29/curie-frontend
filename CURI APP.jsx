@@ -11,12 +11,9 @@ import {
   useGetChildProgressChildrenChildIdProgressGetQuery,
 } from "./src/lib/api/generated/childrenApi";
 import {
-  useCreateLessonLessonsPostMutation,
-  useCreateThemeThemesPostMutation,
   useGetThemesThemesGetQuery,
   usePreviewLessonLessonsLessonIdPreviewGetQuery,
 } from "./src/lib/api/generated/curriculumApi";
-import { themeKeyFromTitle } from "./src/lib/themeKey";
 import {
   useGetChildSessionsSessionsChildIdGetQuery,
   useGetSessionDetailSessionsSessionIdDetailGetQuery,
@@ -32,16 +29,11 @@ import {
   useRespondToyRespondPostMutation,
 } from "./src/lib/api/generated/toyApi";
 import { B } from "./src/lib/brandPalette.js";
-import {
-  useGetChildInterestsQuery,
-  useGetParentChildrenQuery,
-  useUpdateChildGoalsMutation,
-  useUpdateChildInterestsMutation,
-} from "./src/lib/api/homeApi";
+import { useGetParentChildrenQuery } from "./src/lib/api/homeApi";
 import CurriculumManagement from "./src/components/CurriculumManagement.jsx";
 import Loading, { LoadingSpinner } from "./src/components/Loading.tsx";
 import HomeScreen from "./src/components/HomeScreen.tsx";
-import CurriculumGenerator from "./src/components/CurriculumGenerator.tsx";
+import PersonalizedPlanWizard from "./src/components/PersonalizedPlanWizard.tsx";
 import { store } from "./src/lib/store";
 import { baseApi } from "./src/lib/api/baseApi";
 
@@ -367,89 +359,6 @@ function getAgeLabel(dob) {
     today.getMonth() > birthDate.getMonth() ||
     (today.getMonth() === birthDate.getMonth() && today.getDate() >= birthDate.getDate());
   return `Age ${hadBirthday ? age : age - 1}`;
-}
-
-function buildLessonPayload({ themeId, goals, interests, dayNumber = 1 }) {
-  const theme = interests[0] || "Curious";
-  const focus = goals.length ? goals : ["Communication"];
-  const eyfsFocus = toEyfsAreas(focus);
-  const vocabulary = toVocabulary(interests, focus);
-  const lessonType = LESSON_TYPES[(dayNumber - 1) % LESSON_TYPES.length];
-  const lessonKey = `${slugify(theme)}-${dayNumber}`;
-
-  return {
-    theme_id: themeId,
-    day_number: dayNumber,
-    lesson_type: lessonType,
-    learning_goals: {
-      title: `${theme} Adventure`,
-      subject_lens: focus.join(" + "),
-      eyfs_focus: eyfsFocus,
-      lesson_key: lessonKey,
-      content_json: {
-        ai_action: `Guide Leo through a playful ${theme.toLowerCase()} activity that supports ${focus.join(", ")}.`,
-        activity_narrative: `Curious Buddy invites Leo into a ${theme.toLowerCase()} adventure using movement, questions, and imaginative play.`,
-        lesson_key: lessonKey,
-        vocabulary,
-        learning_goals: eyfsFocus,
-        seven_step_structure: {
-          step_1_hook: `Invite Leo into the ${theme.toLowerCase()} adventure with a warm opening question.`,
-          step_2_core_activity: `Explore ${theme.toLowerCase()} through simple choices, actions, and descriptions.`,
-          step_3_do: "Ask Leo to point, move, count, describe, or pretend based on the activity.",
-          step_4_socratic: {
-            opening_question: `What do you notice first in our ${theme.toLowerCase()} adventure?`,
-            age_profiles: {
-              age_3: {
-                expected_action: "Leo answers with a short phrase, gesture, or pretend action.",
-                guiding_question: `Can you show Curious Buddy one ${theme.toLowerCase()} idea?`,
-                extension_question: `What could happen next in the ${theme.toLowerCase()} story?`,
-                educational_goal: `Build confidence in ${focus.join(", ")} through guided play.`,
-              },
-            },
-          },
-          step_5_extension: "Extend with one harder question if Leo is engaged.",
-          step_6_reflection: "Celebrate Leo's idea and name the skill he practiced.",
-        },
-      },
-    },
-    vocabulary,
-  };
-}
-
-function buildPersonalizedPlan({ goals, interests }) {
-  const focus = goals.length ? goals : ["Communication"];
-  const themes = interests.length ? interests : ["Curious"];
-  const activityTypes = ["Story + Discussion", "Movement Game", "Creative Role-play", "Science Exploration", "Maths Puzzle", "Social Practice", "Weekly Review"];
-
-  return DAY_LABELS.map((label, index) => {
-    const theme = themes[index % themes.length];
-    const goal = focus[index % focus.length];
-
-    return {
-      day: DAY_SHORTS[index],
-      label,
-      focus: goal,
-      type: activityTypes[index],
-      status: index === 0 ? "today" : "upcoming",
-      time: index === 6 ? "Free play" : "Curious Buddy",
-      score: null,
-      participation: null,
-      content: [
-        `${theme} themed ${goal.toLowerCase()} activity`,
-        "Socratic check-in question",
-        "Curious Buddy reflection and celebration",
-      ],
-      aiLog: null,
-      questions: [
-        `What do you notice about ${theme.toLowerCase()}?`,
-        `How could we use ${theme.toLowerCase()} to practice ${goal.toLowerCase()}?`,
-      ],
-      localPlan: true,
-      planTheme: theme,
-      planGoals: focus,
-      planInterests: themes,
-    };
-  });
 }
 
 // ── Radar Chart ───────────────────────────────────────────────────────────────
@@ -1194,23 +1103,13 @@ function WeeklyProgressCard({ childId, selectedDate }) {
 }
 
 // ── Tab: Curriculum ───────────────────────────────────────────────────────────
-function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToProfile }) {
+function TabCurriculum({ childId, parentId }) {
   const [selectedDay, setSelectedDay] = useState(null);
-  const [building, setBuilding] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
+  const [buildingPlan, setBuildingPlan] = useState(false);
   const [curriculumSegment, setCurriculumSegment] = useState("progress");
   const [boardThemeId, setBoardThemeId] = useState(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const { data: childForGenerator } = useGetChildChildrenChildIdGetQuery({ childId });
-  const [step, setStep] = useState(0);
-  const [goals, setGoals] = useState([]);
-  const [interests, setInterests] = useState([]);
-  const [generated, setGenerated] = useState(false);
-  const [syncError, setSyncError] = useState("");
-  const [syncedPlan, setSyncedPlan] = useState(null);
-  const [draftPlan, setDraftPlan] = useState(null);
-  const goalOptions     = ["Communication","Maths & Logic","Creative Arts","Social & Emotional","Nature & Science"];
-  const interestOptions = ["Dinosaurs","Space","Ocean","Animals","Superheroes","Cooking"];
   const { data: themes = [], isFetching: isLoadingThemes } = useGetThemesThemesGetQuery();
   const {
     data: curriculumBoard,
@@ -1219,8 +1118,6 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToPr
   } = useGetChildCurriculumBoardChildrenChildIdCurriculumBoardGetQuery(
     childId ? { childId, themeId: boardThemeId ?? undefined } : skipToken,
   );
-  const [createTheme, { isLoading: isCreatingTheme }] = useCreateThemeThemesPostMutation();
-  const [createLesson, { isLoading: isCreatingLesson }] = useCreateLessonLessonsPostMutation();
   const weeklyPlan = useMemo(() => {
     const lessons = curriculumBoard?.lessons;
     if (!lessons?.length) return [];
@@ -1237,161 +1134,18 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToPr
   const avgEngagement = weeklyPlan.length
     ? Math.round(weeklyPlan.reduce((s, d) => s + (d.engagementPercentage || 0), 0) / weeklyPlan.length)
     : 0;
-  const isSyncingPlan = isCreatingTheme || isCreatingLesson;
-  const generatePlan = () => {
-    const days = buildPersonalizedPlan({ goals, interests });
-    const title = `${interests[0] || "Custom"} Adventure`;
-    const plan = { title, goals, interests, days };
-    setDraftPlan(plan);
-    onPersonalizedPlan(plan);
-    setGenerated(true);
-  };
-  const syncPlan = async () => {
-    setSyncError("");
-    const plan = draftPlan || personalizedPlan || { title: `${interests[0] || "Custom"} Adventure`, goals, interests, days: buildPersonalizedPlan({ goals, interests }) };
-
-    try {
-      const theme = await createTheme({
-            themeCreateSchema: {
-              theme_key: themeKeyFromTitle(plan.title, 1),
-              title: plan.title,
-              week_number: 1,
-              duration_days: 7,
-            },
-          }).unwrap();
-
-      const createdLessons = [];
-      for (let index = 0; index < 7; index += 1) {
-        const lessonPayload = buildLessonPayload({
-          themeId: theme.id,
-          goals: plan.goals,
-          interests: plan.interests,
-          dayNumber: index + 1,
-        });
-        createdLessons.push(await createLesson({ lessonCreateSchema: lessonPayload }).unwrap());
-      }
-
-      setSyncedPlan({ theme, lesson: createdLessons[0], count: createdLessons.length });
-      setStep(3);
-    } catch {
-      setSyncedPlan(null);
-      setStep(3);
-      setSyncError("Your plan is saved in the app, but backend sync failed. The backend may require admin permissions for curriculum creation.");
-    }
-  };
-
-  if (building) {
-    const stepLabels = ["Goals","Interests","Generate","Sync"];
+  if (buildingPlan) {
     return (
-      <div style={{ padding:"0 20px 110px" }}>
-        <button onClick={()=>{ setBuilding(false); setStep(0); setGoals([]); setInterests([]); setGenerated(false); setSyncError(""); setSyncedPlan(null); setDraftPlan(null); }}
-          style={{ background:"none", border:"none", color:B.gold, fontSize:14, cursor:"pointer", marginBottom:18, fontFamily:"Georgia, serif" }}>← Back</button>
-
-        {/* Step bar */}
-        <div style={{ display:"flex", gap:6, marginBottom:28 }}>
-          {stepLabels.map((s,i) => (
-            <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:6 }}>
-              <div style={{ height:3, width:"100%", borderRadius:99, background:i<=step ? B.gold : B.creamLow }} />
-              <span style={{ fontSize:9, color:i<=step ? B.gold : B.creamMid, fontWeight:i===step?700:400, letterSpacing:"0.06em", textTransform:"uppercase" }}>{s}</span>
-            </div>
-          ))}
-        </div>
-
-        {step===0 && (
-          <div>
-            <SectionLabel>Step 1 of 4</SectionLabel>
-            <p style={{ color:B.cream, fontSize:20, fontWeight:700, marginBottom:6, fontFamily:"Georgia, serif" }}>What skills to focus on?</p>
-            <p style={{ color:B.creamMid, fontSize:13, marginBottom:22, lineHeight:1.5 }}>Select one or more areas to develop this week</p>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:32 }}>
-              {goalOptions.map(g=>(
-                <button key={g} onClick={()=>setGoals(p=>p.includes(g)?p.filter(x=>x!==g):[...p,g])}
-                  style={{ padding:"10px 18px", borderRadius:99, border:`1.5px solid ${goals.includes(g)?B.gold:B.creamLow}`, background:goals.includes(g)?B.goldFade:"transparent", color:goals.includes(g)?B.gold:B.creamMid, fontSize:13, cursor:"pointer", transition:"all 0.2s", fontFamily:"Georgia, serif" }}>
-                  {g}
-                </button>
-              ))}
-            </div>
-            <button onClick={()=>goals.length&&setStep(1)}
-              style={{ width:"100%", padding:15, borderRadius:12, background:goals.length?B.gold:B.creamFade, color:goals.length?B.dark:B.creamMid, fontWeight:700, border:`1px solid ${goals.length?B.gold:B.creamLow}`, cursor:goals.length?"pointer":"default", fontFamily:"Georgia, serif" }}>
-              Next →
-            </button>
-          </div>
-        )}
-
-        {step===1 && (
-          <div>
-            <SectionLabel>Step 2 of 4</SectionLabel>
-            <p style={{ color:B.cream, fontSize:20, fontWeight:700, marginBottom:6, fontFamily:"Georgia, serif" }}>What's Leo into right now?</p>
-            <p style={{ color:B.creamMid, fontSize:13, marginBottom:22, lineHeight:1.5 }}>AI will weave these themes into the sessions</p>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginBottom:32 }}>
-              {interestOptions.map(g=>(
-                <button key={g} onClick={()=>setInterests(p=>p.includes(g)?p.filter(x=>x!==g):[...p,g])}
-                  style={{ padding:"10px 18px", borderRadius:99, border:`1.5px solid ${interests.includes(g)?B.terra:B.creamLow}`, background:interests.includes(g)?B.terraFade:"transparent", color:interests.includes(g)?B.terra:B.creamMid, fontSize:13, cursor:"pointer", transition:"all 0.2s", fontFamily:"Georgia, serif" }}>
-                  {g}
-                </button>
-              ))}
-            </div>
-            <button onClick={()=>interests.length&&setStep(2)}
-              style={{ width:"100%", padding:15, borderRadius:12, background:interests.length?B.terra:B.creamFade, color:interests.length?B.cream:B.creamMid, fontWeight:700, border:`1px solid ${interests.length?B.terra:B.creamLow}`, cursor:interests.length?"pointer":"default", fontFamily:"Georgia, serif" }}>
-              ✦ Generate AI Curriculum
-            </button>
-          </div>
-        )}
-
-        {step===2 && (
-          <div>
-            {!generated ? (
-              <div style={{ textAlign:"center", padding:"44px 0" }}>
-                <div style={{ fontSize:42, marginBottom:18, color:B.gold }}>◈</div>
-                <p style={{ color:B.cream, fontSize:18, fontWeight:700, fontFamily:"Georgia, serif" }}>Crafting your curriculum...</p>
-                <p style={{ color:B.creamMid, fontSize:13, marginTop:8, lineHeight:1.5 }}>Built on EYFS framework & Socratic Method</p>
-                <button onClick={generatePlan} style={{ marginTop:26, padding:"13px 36px", borderRadius:12, background:B.gold, color:B.dark, border:"none", cursor:"pointer", fontWeight:700, fontFamily:"Georgia, serif" }}>View Curriculum</button>
-              </div>
-            ) : (
-              <div>
-                <SectionLabel>Your Personalised Plan</SectionLabel>
-                <p style={{ color:B.cream, fontSize:20, fontWeight:700, marginBottom:16, fontFamily:"Georgia, serif" }}>AI-Generated Curriculum</p>
-                <div style={{ background:B.goldFade, borderRadius:16, padding:18, marginBottom:22, border:`1px solid rgba(201,139,44,0.25)` }}>
-                  <p style={{ color:B.gold, fontSize:13, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>Theme: {interests[0]||"Custom"} Adventure</p>
-                  <p style={{ color:B.creamMid, fontSize:14, lineHeight:1.7 }}>
-                    Curious Buddy will explore {interests.join(" & ")} adventures and embed:<br />
-                    · {goals.includes("Maths & Logic")?"5 logic & maths puzzles":"5 interactive activities"}<br />
-                    · {goals.includes("Communication")?"3 speaking & listening exercises":"3 creative challenges"}<br />
-                    · A full 7-day EYFS-structured session plan
-                  </p>
-                </div>
-                <button onClick={syncPlan} style={{ width:"100%", padding:15, borderRadius:12, background:B.gold, color:B.dark, fontWeight:700, border:"none", cursor:isSyncingPlan?"default":"pointer", fontFamily:"Georgia, serif", display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
-                  {isSyncingPlan ? (
-                    <>
-                      <LoadingSpinner size="sm" />
-                      <span>Syncing…</span>
-                    </>
-                  ) : (
-                    "Save & Sync to Curious Buddy ✦"
-                  )}
-                </button>
-                <button onClick={()=>{ setStep(3); setSyncedPlan(null); }}
-                  style={{ width:"100%", marginTop:10, padding:13, borderRadius:12, background:B.creamFade, color:B.cream, fontWeight:700, border:`1px solid ${B.creamLow}`, cursor:"pointer", fontFamily:"Georgia, serif" }}>
-                  Use This Plan Without Backend Sync
-                </button>
-                {syncError && <p style={{ color:B.terra, fontSize:12, lineHeight:1.5, marginTop:10 }}>{syncError}</p>}
-              </div>
-            )}
-          </div>
-        )}
-
-        {step===3 && (
-          <div style={{ textAlign:"center", padding:"44px 0" }}>
-            <div style={{ fontSize:52, marginBottom:16 }}>✦</div>
-            <p style={{ color:B.gold, fontSize:22, fontWeight:700, fontFamily:"Georgia, serif" }}>{syncedPlan ? "Sync Complete" : "Plan Ready"}</p>
-            <p style={{ color:B.creamMid, fontSize:14, marginTop:10, lineHeight:1.6 }}>{syncedPlan ? `Theme #${syncedPlan.theme.id} · ${syncedPlan.count || 1} lessons synced` : "Your personalised curriculum is now active in the app."}</p>
-            {syncError && <p style={{ color:B.terra, fontSize:12, lineHeight:1.5, marginTop:10 }}>{syncError}</p>}
-            <button onClick={()=>{ setBuilding(false); setStep(0); setGoals([]); setInterests([]); setGenerated(false); setSyncError(""); setSyncedPlan(null); setDraftPlan(null); }}
-              style={{ marginTop:26, padding:"12px 34px", borderRadius:12, background:B.creamFade, color:B.cream, border:`1px solid ${B.creamLow}`, cursor:"pointer", fontWeight:600 }}>
-              Back to Curriculum
-            </button>
-          </div>
-        )}
-      </div>
+      <PersonalizedPlanWizard
+        childId={childId}
+        parentId={parentId}
+        childName={childForGenerator?.name}
+        defaultWeekNumber={
+          curriculumBoard?.week_number ? curriculumBoard.week_number + 1 : undefined
+        }
+        onClose={() => setBuildingPlan(false)}
+        onActivated={() => setBuildingPlan(false)}
+      />
     );
   }
 
@@ -1532,24 +1286,28 @@ function TabCurriculum({ childId, personalizedPlan, onPersonalizedPlan, onGoToPr
             </>
           )}
 
-          <button onClick={()=>setShowGenerator(true)}
-            style={{ width:"100%", padding:16, borderRadius:16, background:B.gold, color:B.dark, fontWeight:700, fontSize:15, border:"none", cursor:"pointer", marginTop:8, fontFamily:"Georgia, serif", letterSpacing:"0.02em" }}>
-            ✦ Generate a New Curriculum
+          <button
+            type="button"
+            onClick={() => setBuildingPlan(true)}
+            style={{
+              width: "100%",
+              padding: 16,
+              borderRadius: 16,
+              background: B.gold,
+              color: B.dark,
+              fontWeight: 700,
+              fontSize: 15,
+              border: "none",
+              cursor: "pointer",
+              marginTop: 8,
+              fontFamily: "Georgia, serif",
+              letterSpacing: "0.02em",
+            }}
+          >
+            ✦ Build a Personalised Plan
           </button>
 
           {selectedDay && <DaySheet day={selectedDay} childId={childId} onClose={()=>setSelectedDay(null)} />}
-          {showGenerator && (
-            <CurriculumGenerator
-              childId={childId}
-              childName={childForGenerator?.name}
-              defaultWeekNumber={
-                curriculumBoard?.week_number ? curriculumBoard.week_number + 1 : undefined
-              }
-              onClose={()=>setShowGenerator(false)}
-              onActivated={()=>setShowGenerator(false)}
-              onGoToProfile={onGoToProfile ? () => { setShowGenerator(false); onGoToProfile(); } : undefined}
-            />
-          )}
         </>
       )}
     </div>
@@ -1782,263 +1540,12 @@ function ManageChildrenRow({ childId, parentSession, onSessionChange }) {
   );
 }
 
-// ── Goals config (EYFS areas) ──────────────────────────────────────────────────
-// Legacy / alternate EYFS slugs → canonical keys (matches backend app/core/eyfs.py).
-const EYFS_GOAL_ALIASES = {
-  personal_social_emotional_development: "personal_social_emotional",
-  expressive_arts_and_design: "creative_arts",
-  expressive_arts: "creative_arts",
-};
-
-function normalizeGoalSlug(goal) {
-  const key = normalizeKey(goal);
-  return EYFS_GOAL_ALIASES[key] || key;
-}
-
-// Slugs must match backend EYFS_AREAS (app/core/constants.py).
-const EYFS_GOALS_OPTIONS = [
-  { value: "communication_and_language", label: "Communication & Language", icon: "🗣️" },
-  { value: "personal_social_emotional",    label: "Personal & Social",        icon: "🤝" },
-  { value: "physical_development",         label: "Physical Development",      icon: "🏃" },
-  { value: "literacy",                     label: "Literacy",                  icon: "📚" },
-  { value: "mathematics",                  label: "Mathematics",               icon: "🔢" },
-  { value: "understanding_the_world",      label: "Understanding the World",   icon: "🌍" },
-  { value: "creative_arts",                label: "Creative Arts",             icon: "🎨" },
-];
-
-// ── Goals & Interests editor ───────────────────────────────────────────────────
-function GoalsInterestsEditor({ childId, parentId, currentGoals }) {
-  // ── Goals ──
-  const [selectedGoals, setSelectedGoals] = useState([]);
-  const [goalsTouched, setGoalsTouched] = useState(false);
-  const [updateGoals, goalsState] = useUpdateChildGoalsMutation();
-  const [goalsSaved, setGoalsSaved] = useState(false);
-
-  // Sync goals from prop whenever it changes (initial load + after RTK refetch post-save),
-  // but only when the user hasn't made unsaved edits.
-  useEffect(() => {
-    if (!goalsTouched && currentGoals) {
-      setSelectedGoals(currentGoals.map(normalizeGoalSlug));
-    }
-  }, [currentGoals, goalsTouched]);
-
-  // ── Interests ──
-  const { data: interestsData, isFetching: loadingInterests } = useGetChildInterestsQuery({ childId });
-  const [interests, setInterests] = useState([]);
-  const [interestsTouched, setInterestsTouched] = useState(false);
-  const [interestInput, setInterestInput] = useState("");
-  const [updateInterests, interestsState] = useUpdateChildInterestsMutation();
-  const [interestsSaved, setInterestsSaved] = useState(false);
-
-  // Sync interests from API whenever data arrives (initial load + after RTK refetch post-save),
-  // but only when the user hasn't made unsaved edits.
-  useEffect(() => {
-    if (!interestsTouched && interestsData?.interests) {
-      setInterests(interestsData.interests);
-    }
-  }, [interestsData, interestsTouched]);
-
-  const toggleGoal = (value) => {
-    setGoalsTouched(true);
-    setGoalsSaved(false);
-    setSelectedGoals(prev =>
-      prev.includes(value) ? prev.filter(g => g !== value) : [...prev, value]
-    );
-  };
-
-  const saveGoals = async () => {
-    try {
-      await updateGoals({
-        childId,
-        parentId,
-        goals: selectedGoals.map(normalizeGoalSlug),
-      }).unwrap();
-      setGoalsTouched(false); // allow re-sync from fresh RTK data
-      setGoalsSaved(true);
-      setTimeout(() => setGoalsSaved(false), 3000);
-    } catch { /* error shown via goalsState.isError */ }
-  };
-
-  const addInterest = () => {
-    const trimmed = interestInput.trim().toLowerCase();
-    if (!trimmed || interests.includes(trimmed)) { setInterestInput(""); return; }
-    setInterestsTouched(true);
-    setInterestsSaved(false);
-    setInterests(prev => [...prev, trimmed]);
-    setInterestInput("");
-  };
-
-  const removeInterest = (item) => {
-    setInterestsTouched(true);
-    setInterestsSaved(false);
-    setInterests(prev => prev.filter(i => i !== item));
-  };
-
-  const saveInterests = async () => {
-    try {
-      await updateInterests({ childId, interests }).unwrap();
-      setInterestsTouched(false); // allow re-sync from fresh RTK data
-      setInterestsSaved(true);
-      setTimeout(() => setInterestsSaved(false), 3000);
-    } catch { /* error shown via interestsState.isError */ }
-  };
-
-  const profileInputStyle = {
-    flex: 1, padding: "11px 14px", borderRadius: 12, background: B.bgDeep,
-    color: B.cream, border: `1px solid ${B.creamLow}`, fontSize: 14,
-  };
-
-  return (
-    <>
-      {/* ── Goals ── */}
-      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 18, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <span style={{ fontSize: 20 }}>🎯</span>
-          <p style={{ color: B.cream, fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Learning Goals</p>
-        </div>
-        <p style={{ color: B.creamMid, fontSize: 12, lineHeight: 1.5, marginBottom: 16 }}>
-          Select the EYFS areas you want Curi to focus on. This shapes every lesson plan.
-        </p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
-          {EYFS_GOALS_OPTIONS.map(({ value, label, icon }) => {
-            const active = selectedGoals.includes(value);
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => toggleGoal(value)}
-                style={{
-                  padding: "11px 10px", borderRadius: 14, cursor: "pointer", textAlign: "left",
-                  background: active ? B.goldFade : B.creamFade,
-                  border: `1.5px solid ${active ? B.gold : B.creamLow}`,
-                  display: "flex", alignItems: "center", gap: 8,
-                }}
-              >
-                <span style={{ fontSize: 18, flexShrink: 0 }}>{icon}</span>
-                <span style={{ color: active ? B.gold : B.creamMid, fontSize: 12, fontWeight: active ? 700 : 400, lineHeight: 1.3 }}>{label}</span>
-                {active && <span style={{ marginLeft: "auto", color: B.gold, fontSize: 14, flexShrink: 0 }}>✓</span>}
-              </button>
-            );
-          })}
-        </div>
-
-        {selectedGoals.length === 0 && (
-          <p style={{ color: B.terra, fontSize: 12, marginBottom: 12 }}>Select at least one goal to enable curriculum generation.</p>
-        )}
-        {goalsState.isError && (
-          <p style={{ color: B.terra, fontSize: 12, marginBottom: 10 }}>Failed to save — please try again.</p>
-        )}
-
-        <button
-          type="button"
-          onClick={saveGoals}
-          disabled={goalsState.isLoading || selectedGoals.length === 0}
-          style={{
-            width: "100%", padding: 13, borderRadius: 12, fontWeight: 700, fontSize: 14, border: "none",
-            cursor: goalsState.isLoading || selectedGoals.length === 0 ? "default" : "pointer",
-            background: goalsSaved ? B.goldFade : selectedGoals.length === 0 ? B.creamFade : B.gold,
-            color: goalsSaved ? B.gold : selectedGoals.length === 0 ? B.creamMid : B.dark,
-            border: goalsSaved ? `1px solid ${B.gold}` : "none",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-          }}
-        >
-          {goalsState.isLoading ? <><LoadingSpinner size="sm" /><span>Saving…</span></> : goalsSaved ? "✓ Goals saved!" : "Save Goals"}
-        </button>
-      </div>
-
-      {/* ── Interests ── */}
-      <div style={{ background: B.bgDeep, borderRadius: 18, padding: 18, marginBottom: 14, border: `1px solid ${B.creamLow}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <span style={{ fontSize: 20 }}>✨</span>
-          <p style={{ color: B.cream, fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Interests</p>
-        </div>
-        <p style={{ color: B.creamMid, fontSize: 12, lineHeight: 1.5, marginBottom: 16 }}>
-          What does your child love? Curi uses these to pick themes and stories that feel personal.
-        </p>
-
-        {loadingInterests ? (
-          <Loading variant="inline" size="sm" message="Loading interests…" />
-        ) : (
-          <>
-            {/* Interest chips */}
-            {interests.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-                {interests.map(item => (
-                  <div
-                    key={item}
-                    style={{ display: "flex", alignItems: "center", gap: 6, background: B.goldFade, border: `1px solid ${B.creamLow}`, borderRadius: 99, padding: "6px 12px" }}
-                  >
-                    <span style={{ color: B.cream, fontSize: 13, fontWeight: 500 }}>{item}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeInterest(item)}
-                      style={{ background: "none", border: "none", color: B.creamMid, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 0, display: "flex", alignItems: "center" }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {interests.length === 0 && (
-              <p style={{ color: B.creamMid, fontSize: 13, marginBottom: 14 }}>No interests added yet.</p>
-            )}
-
-            {/* Add input */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              <input
-                value={interestInput}
-                onChange={e => setInterestInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && addInterest()}
-                placeholder="e.g. dinosaurs, space, painting…"
-                style={profileInputStyle}
-              />
-              <button
-                type="button"
-                onClick={addInterest}
-                style={{ padding: "11px 16px", borderRadius: 12, background: B.gold, color: B.dark, border: "none", fontWeight: 700, fontSize: 18, cursor: "pointer", flexShrink: 0 }}
-              >
-                +
-              </button>
-            </div>
-
-            {interestsState.isError && (
-              <p style={{ color: B.terra, fontSize: 12, marginBottom: 10 }}>Failed to save — please try again.</p>
-            )}
-
-            <button
-              type="button"
-              onClick={saveInterests}
-              disabled={interestsState.isLoading || interests.length === 0}
-              style={{
-                width: "100%", padding: 13, borderRadius: 12, fontWeight: 700, fontSize: 14, border: "none",
-                cursor: interestsState.isLoading || interests.length === 0 ? "default" : "pointer",
-                background: interestsSaved ? B.goldFade : interests.length === 0 ? B.creamFade : B.gold,
-                color: interestsSaved ? B.gold : interests.length === 0 ? B.creamMid : B.dark,
-                border: interestsSaved ? `1px solid ${B.gold}` : "none",
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              }}
-            >
-              {interestsState.isLoading ? <><LoadingSpinner size="sm" /><span>Saving…</span></> : interestsSaved ? "✓ Interests saved!" : "Save Interests"}
-            </button>
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
 function TabProfile({ childId, parentSession, onSessionChange }) {
   const [childNameInput, setChildNameInput] = useState("");
   const [childDob, setChildDob] = useState("");
   const { data: child, isFetching: isChildProfileLoading } = useGetChildChildrenChildIdGetQuery({ childId });
   const parentId = Number(parentSession?.parentId);
-  const { data: parentChildren = [] } = useGetParentChildrenQuery({ parentId }, { skip: !parentId });
-  const currentChild = parentChildren.find(c => c.id === childId);
-  const currentGoals = currentChild?.goals || [];
-
   const [createChild, { data: createdChild, isLoading: isCreatingChild, isError: didCreateChildFail }] = useCreateChildChildrenPostMutation();
   const childName = child?.name || "Leo";
   const handleCreateChild = () => {
@@ -2088,10 +1595,6 @@ function TabProfile({ childId, parentSession, onSessionChange }) {
         style={{ width:"100%", padding:13, borderRadius:14, background:"transparent", color:B.terra, border:`1.5px solid ${B.terra}`, fontWeight:700, marginBottom:22, cursor:"pointer", fontFamily:"Georgia, serif" }}>
         Log out
       </button>
-
-      {/* ── Goals & Interests ── */}
-      <SectionLabel>Goals &amp; Interests</SectionLabel>
-      <GoalsInterestsEditor childId={childId} parentId={parentId} currentGoals={currentGoals} />
 
       {/* ── Account Setup ── */}
       <SectionLabel>Account Setup</SectionLabel>
@@ -2196,8 +1699,6 @@ export default function CuriApp() {
   const scrollRef = useRef(null);
   const [session, setSession] = useState(null);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [personalizedPlan, setPersonalizedPlan] = useState(null);
-
   useEffect(() => {
     try {
       const savedSession = localStorage.getItem(SESSION_KEY);
@@ -2263,7 +1764,7 @@ export default function CuriApp() {
           />
         )}
         {tab===1 && <TabGrowth childId={childId} />}
-        {tab===2 && <TabCurriculum childId={childId} personalizedPlan={personalizedPlan} onPersonalizedPlan={setPersonalizedPlan} onGoToProfile={() => setTab(3)} />}
+        {tab===2 && <TabCurriculum childId={childId} parentId={parentId} />}
         {tab===3 && <TabProfile childId={childId} parentSession={session} onSessionChange={setSession} />}
       </div>
 
