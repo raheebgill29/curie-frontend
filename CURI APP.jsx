@@ -33,6 +33,7 @@ import { useGetParentChildrenQuery } from "./src/lib/api/homeApi";
 import CurriculumManagement from "./src/components/CurriculumManagement.jsx";
 import Loading, { LoadingSpinner } from "./src/components/Loading.tsx";
 import HomeScreen from "./src/components/HomeScreen.tsx";
+import { SessionEventBody, SessionEventTurnTitle } from "./src/components/SessionEventBody.tsx";
 import PersonalizedPlanWizard from "./src/components/PersonalizedPlanWizard.tsx";
 import { store } from "./src/lib/store";
 import { baseApi } from "./src/lib/api/baseApi";
@@ -765,8 +766,10 @@ function TabDashboard({ childId, onNudge }) {
       {latestEvent && (
         <div style={{ background:B.bgDeep, borderRadius:20, padding:20, marginBottom:14, border:`1px solid ${B.creamLow}` }}>
           <SectionLabel>Latest Session Detail</SectionLabel>
-          <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:6, fontFamily:"Georgia, serif" }}>Turn {latestEvent.turn_number} · {latestEvent.actor}</p>
-          <p style={{ color:B.creamMid, fontSize:13, lineHeight:1.6 }}>{latestEvent.text}</p>
+          <p style={{ color:B.cream, fontSize:14, fontWeight:700, marginBottom:10, fontFamily:"Georgia, serif" }}>
+            <SessionEventTurnTitle event={latestEvent} />
+          </p>
+          <SessionEventBody event={latestEvent} textStyle={{ color: B.creamMid }} />
         </div>
       )}
 

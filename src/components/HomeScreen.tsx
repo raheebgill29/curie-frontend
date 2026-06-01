@@ -17,6 +17,7 @@ import {
 } from "../lib/api/generated/sessionsApi";
 import Loading, { LoadingSpinner } from "./Loading";
 import NudgeTopicModal from "./NudgeTopicModal";
+import { SessionEventBody, SessionEventTurnTitle } from "./SessionEventBody";
 
 // ── Theme tokens (locked to spec) ────────────────────────────────────────────
 const SCREEN_BG = "#3e4f57"; // slate/teal-grey
@@ -481,14 +482,12 @@ function LatestSessionDetailCard({ childId }: { childId: number }) {
           fontFamily: FONT_SERIF,
           fontWeight: 700,
           fontSize: 15,
-          margin: "0 0 6px",
+          margin: "0 0 10px",
         }}
       >
-        Turn {latestEvent.turn_number} · {latestEvent.actor}
+        <SessionEventTurnTitle event={latestEvent} />
       </p>
-      <p style={{ color: TEXT_MUTED, fontFamily: FONT_SANS, fontSize: 13, lineHeight: 1.6, margin: 0 }}>
-        {latestEvent.text}
-      </p>
+      <SessionEventBody event={latestEvent} />
     </div>
   );
 }
