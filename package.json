@@ -9,17 +9,14 @@
     "start": "next start"
   },
   "repository": {
-    "type": "git",
-    "url": "git+https://github.com/raheebgill29/curie-frontend.git"
+    "type": "git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "bugs": {
-    "url": "https://github.com/raheebgill29/curie-frontend/issues"
   },
-  "homepage": "https://github.com/raheebgill29/curie-frontend#readme",
   "dependencies": {
     "@reduxjs/toolkit": "^2.11.1",
     "next": "^16.2.4",
